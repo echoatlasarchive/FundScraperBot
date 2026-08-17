@@ -1,0 +1,51 @@
+name: Weekly and monthly reports
+
+on:
+  schedule:
+    # Monday 09:15 UTC == 12:15 Europe/Istanbul, right after the daily run.
+    - cron: "15 9 * * 1"
+    # First day of the month, same slot.
+    - cron: "15 9 1 * *"
+  workflow_dispatch:
+    inputs:
+      report:
+        description: "Which report to run"
+        type: choice
+        options: [weekly, monthly]
+        default: weekly
+
+permissions:
+  contents: read
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: Choose the report
+        id: pick
+        run: |
+          if [ -n "${{ inputs.report }}" ]; then
+            echo "kind=${{ inputs.report }}" >> "$GITHUB_OUTPUT"
+          elif [ "$(date -u +%d)" = "01" ]; then
+            echo "kind=monthly" >> "$GITHUB_OUTPUT"
+          else
+            echo "kind=weekly" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Reads the snapshots the daily workflow committed; fetches nothing itself.
+      - name: Send
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python -m src.cli ${{ steps.pick.outputs.kind }}

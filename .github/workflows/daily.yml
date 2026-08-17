@@ -1,0 +1,57 @@
+name: Daily report
+
+on:
+  schedule:
+    # TEFAS publishes day T's prices on the morning of T+1.
+    # 09:00 UTC == 12:00 Europe/Istanbul (UTC+3, no DST).
+    - cron: "0 9 * * 1-5"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Print the report instead of sending it"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: fundbot-data
+  cancel-in-progress: false
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: Fetch, store and send
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TEFAS_TOKEN: ${{ secrets.TEFAS_TOKEN }}
+        run: |
+          python -m src.cli daily ${{ inputs.dry_run && '--dry-run' || '' }}
+
+      - name: Commit the snapshot
+        run: |
+          git config user.name "fundbot"
+          git config user.email "fundbot@users.noreply.github.com"
+          git add data
+          if git diff --staged --quiet; then
+            echo "No new data to commit."
+          else
+            git commit -m "data: snapshot $(date -u +%Y-%m-%d)"
+            # The scheduled runs never overlap, but a manual dispatch might.
+            git pull --rebase --autostash origin "${GITHUB_REF_NAME}"
+            git push
+          fi

@@ -1,0 +1,10 @@
+venv/
+__pycache__/
+*.py[cod]
+.DS_Store
+.env
+*.log
+
+# Superseded by src/. Contains a hard-coded Telegram token, so it must never be
+# committed -- the repository is public.
+tefas_scraper.py
