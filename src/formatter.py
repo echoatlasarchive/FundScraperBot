@@ -224,6 +224,117 @@ def _kap_block(items: List[dict], note: Optional[str] = None) -> List[str]:
 # -- reports -----------------------------------------------------------------
 
 
+def _segment_tables(
+    records: List[dict],
+    value_key: str,
+    value_fmt,
+    guard: Optional[str],
+    flow_note: str,
+    limit: int,
+    titles: dict,
+) -> List[str]:
+    """The four tables every segment gets: best, worst, inflow, outflow."""
+    lines: List[str] = []
+    lines += _ranking_block(
+        titles["best"],
+        metrics.top_by(records, value_key, reverse=True, limit=limit, guard=guard),
+        value_key,
+        value_fmt,
+    )
+    lines += _ranking_block(
+        titles["worst"],
+        metrics.top_by(records, value_key, reverse=False, limit=limit, guard=guard),
+        value_key,
+        value_fmt,
+    )
+    lines += _flow_ranking_block(
+        titles["inflow"],
+        metrics.top_by(records, "flow", reverse=True, limit=limit),
+        flow_note,
+    )
+    lines += _flow_ranking_block(
+        titles["outflow"],
+        metrics.top_by(records, "flow", reverse=False, limit=limit),
+        flow_note,
+    )
+    return lines
+
+
+MAIN_TITLES = {
+    "best": "🚀 EN İYİ GETİRİ",
+    "worst": "📉 EN KÖTÜ GETİRİ",
+    "inflow": "💰 EN ÇOK PARA GİRİŞİ",
+    "outflow": "💸 EN ÇOK PARA ÇIKIŞI",
+}
+
+SUB_TITLES = {
+    "best": "En iyi getiri",
+    # "En düşük" rather than "En kötü": money-market funds effectively never post
+    # a negative day, so this table shows the bottom of a positive range.
+    "worst": "En düşük getiri",
+    "inflow": "En çok para girişi",
+    "outflow": "En çok para çıkışı",
+}
+
+
+def _platform_section(
+    heading: str,
+    records: List[dict],
+    value_key: str,
+    guard: Optional[str],
+    flow_note: str,
+    include_money_market: bool,
+) -> List[str]:
+    """One platform's full set of tables, split into general / money market / metals."""
+    segments = metrics.split_segments(records)
+
+    lines = [
+        "",
+        "━━━━━━━━━━━━━━━━━━━━",
+        "<b>{}</b>".format(heading),
+    ]
+
+    if not any(segments.values()):
+        lines.append("<i>Eşikleri geçen fon yok.</i>")
+        return lines
+
+    lines += _segment_tables(
+        segments["general"],
+        value_key,
+        lambda v: percent(v),
+        guard,
+        flow_note,
+        config.TOP_N,
+        MAIN_TITLES,
+    )
+
+    if include_money_market and segments["money_market"]:
+        lines += ["", "<b>🏦 Para Piyasası Fonları</b>"]
+        lines += _segment_tables(
+            segments["money_market"],
+            value_key,
+            lambda v: percent(v, 3),
+            guard,
+            flow_note,
+            config.SUB_TOP_N,
+            SUB_TITLES,
+        )
+
+    if segments["metals"]:
+        lines += ["", "<b>🥇 Kıymetli Madenler (altın · gümüş)</b>"]
+        lines += _segment_tables(
+            segments["metals"],
+            value_key,
+            lambda v: percent(v),
+            guard,
+            flow_note,
+            config.SUB_TOP_N,
+            SUB_TITLES,
+        )
+
+    return lines
+
+
 def daily_report(
     records: List[dict],
     data_day: date,
@@ -234,15 +345,15 @@ def daily_report(
 ) -> str:
     by_code = metrics.index_by_code(records)
     eligible = metrics.eligible_universe(records)
-    non_mm, mm = metrics.split_money_market(eligible)
+    tefas, befas = metrics.split_by_platform(eligible)
 
     lines = [
         "📊 <b>TEFAS + BEFAS Günlük</b>",
         "<i>{} · {} kapanış verileri</i>".format(
             tr_date(run_day, with_weekday=True), tr_date(data_day)
         ),
-        "<i>{} fon tarandı · sıralamalar {} üzeri fonlar arasında</i>".format(
-            count(len(records)), money(config.MIN_AUM_TRY)
+        "<i>{} fon tarandı · sıralamalarda {} ve {} yatırımcı alt sınırı</i>".format(
+            count(len(records)), money(config.MIN_AUM_TRY), count(config.MIN_INVESTORS)
         ),
     ]
 
@@ -262,18 +373,8 @@ def daily_report(
     lines += _watchlist_block(
         by_code, config.MONEY_MARKET_WATCHLIST, "🏦 TAKİP — PARA PİYASASI"
     )
-
-    lines += _ranking_block(
-        "🚀 GÜNÜN EN İYİ GETİRİLERİ",
-        metrics.top_by(non_mm, "daily_return", reverse=True, guard="daily"),
-        "daily_return",
-        lambda v: percent(v),
-    )
-    lines += _ranking_block(
-        "📉 GÜNÜN EN KÖTÜ GETİRİLERİ",
-        metrics.top_by(non_mm, "daily_return", reverse=False, guard="daily"),
-        "daily_return",
-        lambda v: percent(v),
+    lines += _watchlist_block(
+        by_code, config.BEFAS_WATCHLIST, "⭐ TAKİP — BEFAS (Emeklilik)"
     )
 
     flow_note = (
@@ -281,29 +382,22 @@ def daily_report(
         if baseline_day is None
         else "Yeterli veri yok."
     )
-    lines += _flow_ranking_block(
-        "💰 EN ÇOK PARA GİRİŞİ",
-        metrics.top_by(eligible, "flow", reverse=True),
-        flow_note,
-    )
-    lines += _flow_ranking_block(
-        "💸 EN ÇOK PARA ÇIKIŞI",
-        metrics.top_by(eligible, "flow", reverse=False),
-        flow_note,
-    )
 
-    lines += ["", "━━━━━━━━━━━━━━━━━━━━", "<b>🏦 PARA PİYASASI FONLARI</b>"]
-    lines += _ranking_block(
-        "En iyi günlük getiri",
-        metrics.top_by(mm, "daily_return", reverse=True, guard="daily"),
+    lines += _platform_section(
+        "🇹🇷 TEFAS · YATIRIM FONLARI",
+        tefas,
         "daily_return",
-        lambda v: percent(v, 3),
+        "daily",
+        flow_note,
+        include_money_market=True,
     )
-    lines += _flow_ranking_block(
-        "En çok para girişi", metrics.top_by(mm, "flow", reverse=True), flow_note
-    )
-    lines += _flow_ranking_block(
-        "En çok para çıkışı", metrics.top_by(mm, "flow", reverse=False), flow_note
+    lines += _platform_section(
+        "🏛 BEFAS · EMEKLİLİK FONLARI",
+        befas,
+        "daily_return",
+        "daily",
+        flow_note,
+        include_money_market=False,
     )
 
     lines += _kap_block(kap_items or [], kap_note)
@@ -317,10 +411,9 @@ def _period_report(
     emoji: str,
     data_day: date,
     baseline_day: Optional[date],
-    window_name: str,
 ) -> str:
     eligible = metrics.eligible_universe(records)
-    non_mm, mm = metrics.split_money_market(eligible)
+    tefas, befas = metrics.split_by_platform(eligible)
 
     lines = [
         "{} <b>TEFAS + BEFAS {}</b>".format(emoji, label),
@@ -341,55 +434,39 @@ def _period_report(
         )
     )
 
-    lines += _ranking_block(
-        "🚀 {} EN İYİ GETİRİ".format(window_name),
-        metrics.top_by(non_mm, "period_return", reverse=True, guard="period"),
+    lines += _platform_section(
+        "🇹🇷 TEFAS · YATIRIM FONLARI",
+        tefas,
         "period_return",
-        lambda v: percent(v),
+        "period",
+        "Yeterli veri yok.",
+        include_money_market=True,
     )
-    lines += _ranking_block(
-        "📉 {} EN KÖTÜ GETİRİ".format(window_name),
-        metrics.top_by(non_mm, "period_return", reverse=False, guard="period"),
+    lines += _platform_section(
+        "🏛 BEFAS · EMEKLİLİK FONLARI",
+        befas,
         "period_return",
-        lambda v: percent(v),
-    )
-    lines += _flow_ranking_block(
-        "💰 {} EN ÇOK PARA GİRİŞİ".format(window_name),
-        metrics.top_by(eligible, "flow", reverse=True),
+        "period",
         "Yeterli veri yok.",
+        include_money_market=False,
     )
-    lines += _flow_ranking_block(
-        "💸 {} EN ÇOK PARA ÇIKIŞI".format(window_name),
-        metrics.top_by(eligible, "flow", reverse=False),
-        "Yeterli veri yok.",
-    )
+
     lines += _ranking_block(
-        "📈 AUM'U EN ÇOK BÜYÜYEN",
+        "📈 AUM'U EN ÇOK BÜYÜYEN (tümü)",
         metrics.top_by(eligible, "aum_change_pct", reverse=True),
         "aum_change_pct",
         lambda v: percent(v, 1),
-    )
-
-    lines += ["", "━━━━━━━━━━━━━━━━━━━━", "<b>🏦 PARA PİYASASI FONLARI</b>"]
-    lines += _ranking_block(
-        "En iyi getiri",
-        metrics.top_by(mm, "period_return", reverse=True, guard="period"),
-        "period_return",
-        lambda v: percent(v, 3),
-    )
-    lines += _flow_ranking_block(
-        "En çok para girişi", metrics.top_by(mm, "flow", reverse=True), "Yeterli veri yok."
     )
 
     return "\n".join(lines)
 
 
 def weekly_report(records, data_day, baseline_day) -> str:
-    return _period_report(records, "Haftalık", "🗓", data_day, baseline_day, "HAFTANIN")
+    return _period_report(records, "Haftalık", "🗓", data_day, baseline_day)
 
 
 def monthly_report(records, data_day, baseline_day) -> str:
-    return _period_report(records, "Aylık", "📅", data_day, baseline_day, "AYIN")
+    return _period_report(records, "Aylık", "📅", data_day, baseline_day)
 
 
 # -- delivery helpers --------------------------------------------------------

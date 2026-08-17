@@ -27,7 +27,7 @@ def make_record(code, **overrides):
         "daily_return": 1.0,
         "shares": 1_000_000_000,
         "aum": 2_000_000_000.0,
-        "investors": 10_000,
+        "investors": 10_000,  # comfortably above config.MIN_INVESTORS
         "market_share": 1.5,
         "cat_rank": 3,
         "cat_count": 197,
@@ -143,6 +143,63 @@ class TestFilters(unittest.TestCase):
         self.assertEqual([r["code"] for r in rest], ["EQT"])
         self.assertEqual([r["code"] for r in money_market], ["MMF"])
 
+    def test_thinly_held_fund_is_excluded(self):
+        # A private vehicle: half a billion lira, 22 investors. Real example.
+        private = make_record("PPF", aum=549_797_497.0, investors=22)
+        retail = make_record("RTL", aum=549_797_497.0, investors=12_000)
+        self.assertEqual(
+            [r["code"] for r in metrics.eligible_universe([private, retail])], ["RTL"]
+        )
+
+
+class TestSegmentation(unittest.TestCase):
+    def test_turkish_case_folding(self):
+        # "ALTIN" uses a dotless-I capital; "Altın" a dotless-i lowercase.
+        self.assertEqual(metrics.fold("ALTIN"), metrics.fold("Altın"))
+        self.assertEqual(metrics.fold("KIYMETLİ"), "kiymetli")
+
+    def test_gold_and_silver_funds_are_metals(self):
+        cases = [
+            ("QNB PORTFÖY ALTIN FONU", "Altın Fonu"),
+            ("AK PORTFÖY GÜMÜŞ FON SEPETI FONU", "Fon Sepeti Fonu"),
+            ("GARANTİ EMEKLİLİK GÜMÜŞ FON SEPETİ EMEKLİLİK YATIRIM FONU", "Fon Sepeti Fonu"),
+            ("TEB PORTFÖY KIYMETLİ MADENLER FON SEPETİ FONU", "Fon Sepeti Fonu"),
+            ("OSMANLI PORTFÖY ALTIN FON SEPETİ FONU", "Fon Sepeti Fonu"),
+        ]
+        for name, category in cases:
+            record = make_record("X", name=name, category=category, umbrella=category)
+            self.assertTrue(metrics.is_precious_metal(record), name)
+
+    def test_altinci_is_not_gold(self):
+        # "Altıncı" means "sixth". A substring search would wrongly match it.
+        for name in (
+            "AK PORTFÖY ALTINCI SERBEST(DÖVİZ) FON",
+            "İSTANBUL PORTFÖY ONALTINCI SERBEST FON",
+            "ZİRAAT PORTFÖY ALTINCI SERBEST (TL) FON",
+        ):
+            record = make_record("X", name=name, category="Serbest Fon",
+                                 umbrella="Serbest Şemsiye Fonu")
+            self.assertFalse(metrics.is_precious_metal(record), name)
+
+    def test_segments_are_disjoint_and_complete(self):
+        records = [
+            make_record("EQT"),
+            make_record("MMF", category="Para Piyasası Fonu"),
+            make_record("GLD", name="QNB PORTFÖY ALTIN FONU", category="Altın Fonu"),
+        ]
+        segments = metrics.split_segments(records)
+        self.assertEqual([r["code"] for r in segments["general"]], ["EQT"])
+        self.assertEqual([r["code"] for r in segments["money_market"]], ["MMF"])
+        self.assertEqual([r["code"] for r in segments["metals"]], ["GLD"])
+        self.assertEqual(sum(len(v) for v in segments.values()), len(records))
+
+    def test_platform_split(self):
+        tefas, befas = metrics.split_by_platform(
+            [make_record("YAT1"), make_record("EMK1", fund_type="EMK")]
+        )
+        self.assertEqual([r["code"] for r in tefas], ["YAT1"])
+        self.assertEqual([r["code"] for r in befas], ["EMK1"])
+
 
 class TestDateLogic(unittest.TestCase):
     def test_monday_run_reports_friday(self):
@@ -171,6 +228,19 @@ class TestReportRendering(unittest.TestCase):
             )
             for code in ("TP2", "PRY", "PNU")
         ]
+        records += [
+            make_record("B{:03d}".format(i), fund_type="EMK", daily_return=i * 0.1)
+            for i in range(20)
+        ]
+        records += [
+            make_record(
+                "G{:03d}".format(i),
+                name="PORTFÖY ALTIN FONU {}".format(i),
+                category="Altın Fonu",
+                daily_return=i * 0.2,
+            )
+            for i in range(12)
+        ]
         records += [make_record("F{:03d}".format(i), daily_return=i * 0.1) for i in range(40)]
         return metrics.attach_deltas(records, {})
 
@@ -183,7 +253,10 @@ class TestReportRendering(unittest.TestCase):
             kap_note="KAP kapalı.",
         )
         self.assertIn("TAKİP LİSTEM", text)
-        self.assertIn("PARA PİYASASI", text)
+        self.assertIn("Para Piyasası", text)
+        self.assertIn("Kıymetli Madenler", text)
+        self.assertIn("TEFAS · YATIRIM FONLARI", text)
+        self.assertIn("BEFAS · EMEKLİLİK FONLARI", text)
         self.assertIn("ilk kayıt", text)      # day-one explanation
         self.assertIn("KAP kapalı.", text)
         self.assertEqual(text.count("<pre>"), text.count("</pre>"))
@@ -240,6 +313,16 @@ class TestReportRendering(unittest.TestCase):
         )
         for code in config.ALL_WATCHED:
             self.assertIn(code, text)
+
+    def test_metals_do_not_leak_into_the_headline_table(self):
+        text = formatter.daily_report(
+            records=self._records(),
+            data_day=date(2026, 8, 17),
+            run_day=date(2026, 8, 18),
+            baseline_day=None,
+        )
+        headline = text.split("🥇")[0].split("🏦 Para Piyasası")[0]
+        self.assertNotIn("G011", headline)  # best-performing gold fund
 
 
 if __name__ == "__main__":

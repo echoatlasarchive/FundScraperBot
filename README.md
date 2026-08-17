@@ -7,17 +7,59 @@ Code and comments are English. The bot's output is Turkish.
 
 ## What it reports
 
-* **Watchlist** — daily return, AUM, investor count, net flow, category rank and
-  market share for `PHE`, `TLY`, `KHA`, `THF`, plus a separate money-market
-  section for `TP2`, `PRY`, `PNU`.
-* **Rankings** — top 10 best and worst daily returns, top 10 net inflows and
-  outflows, and the same tables again restricted to money-market funds.
-* **Weekly / monthly** — the same shape over a longer window, plus the funds
-  whose AUM grew the most.
+**Watchlists** — daily return, AUM, investor count, net flow, category rank and
+market share for each of:
 
-Rankings only consider funds with at least 100 million TRY under management
-(`config.MIN_AUM_TRY`). Small funds otherwise dominate every leaderboard with
-percentage moves that are noise.
+| Group | Funds |
+|---|---|
+| TEFAS | `PHE`, `TLY`, `KHA`, `THF` |
+| Money market | `TP2`, `PRY`, `PNU` |
+| BEFAS (pension) | `GGJ`, `TVH`, `GCN`, `FFC`, `NHN`, `BZY` |
+
+**Rankings** — TEFAS and BEFAS are reported under separate headings, each with
+best/worst returns and largest inflows/outflows (top 10), then the same four
+tables again for its sub-segments (top 5):
+
+* *Money market* — TEFAS only. Pension funds have no money-market category, so
+  BEFAS gets no such section.
+* *Precious metals* — gold and silver funds pooled together, on both platforms.
+
+**Weekly / monthly** — the same shape over a longer window, plus the funds whose
+AUM grew the most.
+
+### Who makes it into a ranking
+
+Two thresholds, both in `src/config.py`:
+
+* `MIN_AUM_TRY` — 100 million TRY. Tiny funds otherwise dominate every
+  leaderboard with percentage moves that are noise.
+* `MIN_INVESTORS` — 1,000. Size alone does not separate a retail fund from a
+  private vehicle: plenty of "Serbest" funds hold hundreds of millions on behalf
+  of a handful of investors. Before this filter the top-10 daily gainers
+  included funds with 17, 19 and 23 investors. The threshold sits just below the
+  10th percentile of the mainstream categories (equity 1,057, mixed 816) so it
+  barely touches them, while the median Serbest fund has 537 investors — that
+  category drops from 27.7% of the eligible universe to 13.5%.
+
+Money-market and precious-metal funds are held out of the headline tables, since
+they have their own. Otherwise a rally in gold fills every slot of the general
+leaderboard with the same trade.
+
+### Segment classification
+
+Category alone is not enough, so the fund's name is matched too.
+
+* **Money market** — TEFAS files only 49 funds under "Para Piyasası Fonu", but
+  105 are money-market funds in substance; the rest are logged as "Serbest" or
+  "Katılım" (e.g. *Ak Portföy Para Piyasası Katılım Serbest Fon*).
+* **Precious metals** — spread across "Altın Fonu", "Altın Katılım Fonu",
+  "Kıymetli Madenler" and plain "Fon Sepeti Fonu" for the silver basket funds.
+
+Matching uses word boundaries on case- and diacritic-folded text. Both details
+matter: Turkish `ALTIN`/`Altın` fold differently under `str.lower()`, and a
+naive substring search for "altın" also matches **altıncı** ("sixth"), which
+would misfile ordinary hedge funds such as *Ak Portföy Altıncı Serbest* as gold
+funds.
 
 ## Data sources
 

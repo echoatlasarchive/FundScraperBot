@@ -16,7 +16,8 @@ to within rounding.)
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional
+import re
+from typing import Dict, List, Optional, Tuple
 
 from . import config
 
@@ -24,15 +25,51 @@ from . import config
 # -- classification ----------------------------------------------------------
 
 
+def fold(text: str) -> str:
+    """Case- and diacritic-fold Turkish text so matching is predictable.
+
+    Turkish has a dotted/dotless i split that ``str.lower()`` gets wrong for our
+    purposes: "ALTIN" (written with Latin I) lowercases to "altin", while
+    "Altın" lowercases to "altın". Folding both dotted and dotless forms to a
+    plain "i" makes the two comparable.
+    """
+    return (
+        (text or "")
+        .replace("İ", "i")
+        .replace("I", "i")
+        .lower()
+        .replace("ı", "i")
+    )
+
+
+def _haystack(record: dict) -> str:
+    return fold(
+        "{} {} {}".format(
+            record.get("category") or "",
+            record.get("umbrella") or "",
+            record.get("name") or "",
+        )
+    )
+
+
 def is_money_market(record: dict) -> bool:
-    haystack = "{} {}".format(
-        record.get("category") or "", record.get("umbrella") or ""
-    ).lower()
+    haystack = _haystack(record)
     return any(keyword in haystack for keyword in config.MONEY_MARKET_KEYWORDS)
+
+
+def is_precious_metal(record: dict) -> bool:
+    haystack = _haystack(record)
+    return any(
+        re.search(pattern, haystack) for pattern in config.PRECIOUS_METAL_PATTERNS
+    )
 
 
 def is_pension(record: dict) -> bool:
     return (record.get("fund_type") or "") == "EMK"
+
+
+def is_tefas(record: dict) -> bool:
+    return (record.get("fund_type") or "") == "YAT"
 
 
 # -- eligibility -------------------------------------------------------------
@@ -52,6 +89,11 @@ def passes_size_filter(record: dict) -> bool:
     return aum is not None and aum >= config.MIN_AUM_TRY
 
 
+def passes_investor_filter(record: dict) -> bool:
+    investors = _num(record.get("investors"))
+    return investors is not None and investors >= config.MIN_INVESTORS
+
+
 def plausible_daily_return(record: dict) -> bool:
     ret = _num(record.get("daily_return"))
     return ret is not None and abs(ret) <= config.MAX_ABS_DAILY_RETURN_PCT
@@ -63,8 +105,10 @@ def plausible_period_return(value) -> bool:
 
 
 def eligible_universe(records: List[dict]) -> List[dict]:
-    """Funds large enough, and clean enough, to appear in a ranking."""
-    return [r for r in records if passes_size_filter(r)]
+    """Funds large and widely held enough to appear in a ranking."""
+    return [
+        r for r in records if passes_size_filter(r) and passes_investor_filter(r)
+    ]
 
 
 # -- deltas ------------------------------------------------------------------
@@ -220,12 +264,42 @@ def top_by(
     return [record for _, record in pool[:limit]]
 
 
-def split_money_market(records: List[dict]):
+def split_money_market(records: List[dict]) -> Tuple[List[dict], List[dict]]:
     """Return ``(non_money_market, money_market)``."""
     mm, rest = [], []
     for record in records:
         (mm if is_money_market(record) else rest).append(record)
     return rest, mm
+
+
+def split_segments(records: List[dict]) -> Dict[str, List[dict]]:
+    """Partition funds into the sections the report prints.
+
+    Money-market and precious-metal funds get their own tables, so they are
+    kept out of ``general``. Otherwise a rally in gold fills every slot of the
+    headline leaderboard with the same trade, which says nothing the dedicated
+    metals table would not already show.
+    """
+    segments: Dict[str, List[dict]] = {
+        "general": [],
+        "money_market": [],
+        "metals": [],
+    }
+    for record in records:
+        if is_money_market(record):
+            segments["money_market"].append(record)
+        elif is_precious_metal(record):
+            segments["metals"].append(record)
+        else:
+            segments["general"].append(record)
+    return segments
+
+
+def split_by_platform(records: List[dict]) -> Tuple[List[dict], List[dict]]:
+    """Return ``(tefas, befas)`` -- securities funds and pension funds."""
+    tefas = [r for r in records if not is_pension(r)]
+    befas = [r for r in records if is_pension(r)]
+    return tefas, befas
 
 
 def index_by_code(records: List[dict]) -> Dict[str, dict]:
