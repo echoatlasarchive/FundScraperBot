@@ -151,7 +151,7 @@ def run_daily(args) -> List[str]:
     kap_items = kap.fetch_disclosures(watched, today=run_dt.date())
     kap_note = None if kap.ENABLED else kap.DISABLED_NOTE
 
-    return formatter.daily_report(
+    common = dict(
         records=records,
         data_day=effective_day,
         run_day=run_dt.date(),
@@ -159,6 +159,20 @@ def run_daily(args) -> List[str]:
         kap_items=kap_items,
         kap_note=kap_note,
     )
+
+    channel = config.telegram_channel_id()
+    if channel and not args.dry_run:
+        # Posted separately from the owner's copy, and without the watchlists.
+        # A channel failure must not cost the owner their report, so it is
+        # attempted first and its errors are swallowed.
+        try:
+            telegram.send(
+                formatter.daily_report(public=True, **common), chat_id=channel
+            )
+        except Exception as exc:  # noqa: BLE001 - the private report matters more
+            log.warning("Could not post to the public channel: %s", exc)
+
+    return formatter.daily_report(**common)
 
 
 def _run_period(days_back: int, builder) -> List[str]:

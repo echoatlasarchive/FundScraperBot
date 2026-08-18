@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Optional
 
 # --- Paths -----------------------------------------------------------------
 
@@ -85,6 +86,19 @@ PRECIOUS_METAL_PATTERNS = (
     r"kiymetli maden",
 )
 
+# --- Public channel --------------------------------------------------------
+
+# The public report deliberately omits the watchlists. Those are the owner's own
+# holdings: publishing them would expose a personal portfolio, and framing a
+# named set of funds as "mine" reads uncomfortably close to a recommendation.
+# The channel gets the rankings and the KAP disclosures, which is what it
+# promises its readers anyway.
+PUBLIC_DISCLAIMER = (
+    "Burada yer alan veriler kamuya açık TEFAS, BEFAS ve KAP kaynaklarından "
+    "otomatik derlenmiştir. Yatırım tavsiyesi değildir."
+)
+
+
 # --- Runtime secrets -------------------------------------------------------
 
 
@@ -103,3 +117,12 @@ def telegram_chat_id() -> str:
     if not chat_id:
         raise RuntimeError("TELEGRAM_CHAT_ID is not set.")
     return chat_id
+
+
+def telegram_channel_id() -> Optional[str]:
+    """Public channel, if one is configured.
+
+    Optional: without it the bot simply reports to its owner as before.
+    """
+    channel = os.environ.get("TELEGRAM_CHANNEL_ID", "").strip()
+    return channel or None

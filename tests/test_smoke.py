@@ -489,3 +489,63 @@ class TestKapRendering(unittest.TestCase):
     def test_no_disclosures_says_so(self):
         block = formatter._kap_block([])[0]
         self.assertIn("yeni bildirim yok", block)
+
+
+class TestPublicReport(unittest.TestCase):
+    def _records(self):
+        records = [
+            make_record(code, daily_return=v)
+            for code, v in [("PHE", 3.1), ("TLY", 2.2), ("KHA", -1.4), ("THF", 0.3)]
+        ]
+        records += [
+            make_record(c, category="Para Piyasası Fonu", daily_return=0.38)
+            for c in ("TP2", "PRY", "PNU")
+        ]
+        records += [
+            make_record(c, fund_type="EMK", daily_return=0.4)
+            for c in config.BEFAS_WATCHLIST
+        ]
+        records += [make_record("F{:03d}".format(i), daily_return=i * 0.1) for i in range(30)]
+        return metrics.attach_deltas(records, {})
+
+    def test_public_report_omits_the_owners_watchlists(self):
+        # The watchlists are a personal portfolio; a public channel must not
+        # carry them.
+        text = formatter.render(
+            formatter.daily_report(
+                records=self._records(),
+                data_day=date(2026, 8, 17),
+                run_day=date(2026, 8, 18),
+                baseline_day=None,
+                public=True,
+            )
+        )
+        self.assertNotIn("TAKİP LİSTEM", text)
+        self.assertNotIn("TAKİP — BEFAS", text)
+        # ...but the rankings it exists for are still there.
+        self.assertIn("EN İYİ GETİRİ", text)
+        self.assertIn("EN ÇOK PARA GİRİŞİ", text)
+
+    def test_public_report_carries_the_disclaimer(self):
+        text = formatter.render(
+            formatter.daily_report(
+                records=self._records(),
+                data_day=date(2026, 8, 17),
+                run_day=date(2026, 8, 18),
+                baseline_day=None,
+                public=True,
+            )
+        )
+        self.assertIn("Yatırım tavsiyesi değildir", text)
+
+    def test_private_report_still_has_the_watchlists(self):
+        text = formatter.render(
+            formatter.daily_report(
+                records=self._records(),
+                data_day=date(2026, 8, 17),
+                run_day=date(2026, 8, 18),
+                baseline_day=None,
+            )
+        )
+        self.assertIn("TAKİP LİSTEM", text)
+        self.assertNotIn("Yatırım tavsiyesi değildir", text)

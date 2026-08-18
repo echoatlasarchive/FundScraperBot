@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import List
+from typing import List, Optional
 
 import requests
 
@@ -15,14 +15,15 @@ log = logging.getLogger(__name__)
 API = "https://api.telegram.org/bot{token}/sendMessage"
 
 
-def send(blocks, disable_preview: bool = True) -> None:
+def send(blocks, disable_preview: bool = True, chat_id: Optional[str] = None) -> None:
     """Send a report, packing its blocks into as few messages as fit.
 
     Accepts the block list a report builder returns, or a plain string.
+    ``chat_id`` defaults to the owner's private chat.
     """
     chunks = formatter.split_for_telegram(blocks)
     token = config.telegram_token()
-    chat_id = config.telegram_chat_id()
+    chat_id = chat_id or config.telegram_chat_id()
 
     for index, chunk in enumerate(chunks, start=1):
         payload = {
@@ -39,7 +40,10 @@ def send(blocks, disable_preview: bool = True) -> None:
                     index, len(chunks), resp.status_code, resp.text[:300]
                 )
             )
-        log.info("Sent message %d/%d (%d chars).", index, len(chunks), len(chunk))
+        log.info(
+            "Sent message %d/%d (%d chars) to %s.",
+            index, len(chunks), len(chunk), chat_id,
+        )
         if index < len(chunks):
             time.sleep(0.5)
 

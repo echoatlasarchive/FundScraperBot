@@ -419,7 +419,14 @@ def daily_report(
     baseline_day: Optional[date],
     kap_items: Optional[List[dict]] = None,
     kap_note: Optional[str] = None,
+    public: bool = False,
 ) -> List[str]:
+    """The daily report.
+
+    ``public=True`` drops the watchlist blocks and appends a disclaimer. Those
+    blocks are the owner's own holdings; a public channel gets the rankings and
+    the KAP disclosures, which is what it exists to provide.
+    """
     by_code = metrics.index_by_code(records)
     eligible = metrics.eligible_universe(records)
     tefas, befas = metrics.split_by_platform(eligible)
@@ -437,13 +444,14 @@ def daily_report(
             "itibaren gelecek.</i>"
         )
 
-    blocks += _watchlist_block(by_code, config.WATCHLIST, "⭐ TAKİP LİSTEM", True)
-    blocks += _watchlist_block(
-        by_code, config.MONEY_MARKET_WATCHLIST, "🏦 TAKİP — PARA PİYASASI", False
-    )
-    blocks += _watchlist_block(
-        by_code, config.BEFAS_WATCHLIST, "⭐ TAKİP — BEFAS (Emeklilik)", True
-    )
+    if not public:
+        blocks += _watchlist_block(by_code, config.WATCHLIST, "⭐ TAKİP LİSTEM", True)
+        blocks += _watchlist_block(
+            by_code, config.MONEY_MARKET_WATCHLIST, "🏦 TAKİP — PARA PİYASASI", False
+        )
+        blocks += _watchlist_block(
+            by_code, config.BEFAS_WATCHLIST, "⭐ TAKİP — BEFAS (Emeklilik)", True
+        )
 
     flow_note = (
         "Akış hesabı için önceki güne ait kayıt gerekiyor."
@@ -468,6 +476,8 @@ def daily_report(
 
     blocks += _kap_block(kap_items or [], kap_note)
     blocks.append(_footnote(len(records)))
+    if public:
+        blocks.append("<i>{}</i>".format(esc(config.PUBLIC_DISCLAIMER)))
     return blocks
 
 
