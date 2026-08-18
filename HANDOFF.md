@@ -1,7 +1,8 @@
 # Handoff — FundScraperBot
 
 Context for picking this project up cold, in a fresh session or by another
-person. Written 2026-08-18.
+person. Written 2026-08-18, last updated 2026-08-18 (same day, after the
+report-format rework and the KAP implementation).
 
 Read `README.md` first for what the bot does and how to run it. This file
 covers the things that are **not** obvious from the code: what was tried and
@@ -198,7 +199,57 @@ performance.
 
 ---
 
-## 6. KAP
+## 6. Report format (`src/formatter.py`)
+
+Rebuilt once already, from a first draft that packed every available figure in.
+The current shape came from direct user feedback and is deliberately terse:
+five rows per table, no AUM/category-rank clutter, full fund names on rankings
+that need them.
+
+### Blocks, not one long string
+
+Report builders (`daily_report`, `weekly_report`, `monthly_report`) return
+`List[str]`, not a single string. A **block** is one heading plus its table.
+`split_for_telegram()` packs blocks into messages and never cuts one in half —
+otherwise a heading can be stranded at the bottom of one message with its table
+at the top of the next. `formatter.render(blocks)` joins them back into one
+string, for tests and for `telegram.preview()`.
+
+### No bold inside tables, and never will be
+
+Every numeric table is a `<pre>` block, for column alignment. An early version
+marked each column's best value with `<b>`. **Telegram silently discards
+formatting nested inside `<pre>`**: a probe message sent through the real bot
+API came back with a single `pre` entity and no `bold` entity at all — verified
+against the API response, not the docs. An ASCII `*` marker was tried as a
+substitute and then removed on user feedback for being clutter. There is no
+way to have both alignment and per-cell emphasis in one Telegram message; do
+not attempt it again without a fundamentally different table shape (e.g.
+splitting emphasised values into their own line).
+
+### Table shapes
+
+Two shapes, chosen by whether the row needs a fund's full name:
+
+* **Aligned `<pre>` tables** (watchlists, returns rankings within a segment):
+  fixed-width columns, five rows, no fund name — used when the code alone is
+  identifying enough (a watchlist the user already knows, or a numbered rank).
+* **Two-line entries** (flow/investor-change rankings, KAP items): rank + code
+  + value on one line, the full fund name in italics underneath. Fund names run
+  to 70+ characters and cannot share a fixed-width row with anything else.
+
+### Numbers
+
+Turkish formatting lives in a handful of primitives at the top of the module:
+`tr_number` (dot thousands, comma decimal), `money` (₺ with Mr/Mn/B suffixes),
+`money_compact` (same idea without the space, for table cells), `percent` /
+`pct_bare`, `signed_int`. Reuse these rather than formatting inline — the
+compact and full forms exist because six-column watchlist rows need the
+narrower one to fit in ~40 characters on a phone.
+
+---
+
+## 7. KAP
 
 Implemented in `src/kap.py`, for watchlist funds only. Worth knowing before
 touching it, because most of this was found the hard way:
@@ -243,7 +294,7 @@ touching it, because most of this was found the hard way:
   fifty rows on the next press. The button is pressed up to three times before
   an empty table is believed.
 
-## 7. Open items
+## 8. Open items
 
 ### Backfilling flow history
 
@@ -251,6 +302,17 @@ Decided to accept "start collecting from today" rather than delay launch. If a
 source for historical AUM / investor counts turns up (SPK or Takasbank
 bulletins, an archive site, a third-party dataset), it could be injected into
 `data/snapshots/` retroactively using the same CSV schema.
+
+### KAP window boundary — a known judgment call
+
+The window is exactly noon-to-noon (`kap.REPORT_HOUR = 12`), matching when the
+report is sent. This means a disclosure published *before* noon on the previous
+calendar day is never reported — it belonged to the previous day's window. The
+user flagged one such case (PRY, 08:58 the day before) as something they
+expected to see; it was excluded on purpose, following the noon rule they had
+stated explicitly. If this comes up again, the fix is one line
+(`REPORT_HOUR = 0`), but note the trade-off: a wider window means disclosures
+published between midnight and noon appear in two consecutive reports.
 
 ### Other
 
@@ -267,7 +329,7 @@ bulletins, an archive site, a third-party dataset), it could be injected into
 
 ---
 
-## 8. Operating it
+## 9. Operating it
 
 ```bash
 # See today's report without sending it (no credentials needed)
