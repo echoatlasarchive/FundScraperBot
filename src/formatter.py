@@ -12,9 +12,13 @@ Two table shapes are used:
 
 * Numeric comparisons go in ``<pre>`` blocks so columns line up in the phone's
   monospace font. Lines stay under ~40 characters to avoid horizontal scrolling,
-  and the best value in each column is marked with ``*`` -- Telegram does not
-  render nested formatting inside ``<pre>``, and an ASCII marker is the only one
-  guaranteed not to disturb the alignment.
+  and the best value in each column is marked with ``*``.
+
+  Bold would read better, but Telegram silently discards nested formatting
+  inside ``<pre>``: sending ``<pre>...<b>+0,30</b>...</pre>`` comes back from
+  the API with a single ``pre`` entity and no ``bold`` entity at all. Alignment
+  needs ``<pre>`` and bold needs to be outside it, so the two cannot be had
+  together; an ASCII marker is the compromise that does not disturb the columns.
 * Rankings that carry a fund's full name use two lines per entry instead, since
   those names run to seventy characters and would wreck any fixed-width layout.
 """
@@ -92,6 +96,29 @@ def pct_bare(value: Optional[float], decimals: int = 2) -> str:
     return "{}{}".format(sign, tr_number(abs(value), decimals))
 
 
+def money_compact(value: Optional[float]) -> str:
+    """Lira amount squeezed for a table cell: -1,5Mr / +354Mn / +98,0B."""
+    if value is None:
+        return "—"
+    sign = "+" if value > 0 else ("-" if value < 0 else " ")
+    magnitude = abs(value)
+
+    if magnitude >= 1_000_000_000:
+        return "{}{}Mr".format(sign, tr_number(magnitude / 1_000_000_000, 1))
+    if magnitude >= 1_000_000:
+        return "{}{}Mn".format(sign, tr_number(magnitude / 1_000_000, 0))
+    if magnitude >= 1_000:
+        return "{}{}B".format(sign, tr_number(magnitude / 1_000, 0))
+    return "{}{}".format(sign, tr_number(magnitude, 0))
+
+
+def signed_int(value: Optional[float]) -> str:
+    if value is None:
+        return "—"
+    sign = "+" if value > 0 else ("-" if value < 0 else " ")
+    return "{}{}".format(sign, tr_number(abs(value), 0))
+
+
 def count(value: Optional[float]) -> str:
     if value is None:
         return "—"
@@ -144,14 +171,27 @@ def _num(value):
 
 # -- returns table (code + daily / 1m / YTD, best marked) ---------------------
 
+# (field, heading, cell width, formatter, mark-the-best)
+# Only returns are marked -- those are the columns worth comparing across funds.
+# Widths are tuned so the widest row stays inside ~40 characters even with the
+# flow columns attached, which is what fits a phone without sideways scrolling.
 RETURN_COLUMNS = (
-    ("daily_return", "Günlük", 8),
-    ("ret_1m", "1 Ay", 8),
-    ("ret_ytd", "Yılbaşı", 9),
+    ("daily_return", "Günlük", 6, lambda v: pct_bare(v, 2), True),
+    ("ret_1m", "1 Ay", 6, lambda v: pct_bare(v, 2), True),
+    # Wider than its values need: "Yılbaşı" is itself seven characters, so a
+    # narrower slot would run the heading into the one before it.
+    ("ret_ytd", "Yılbaşı", 7, lambda v: pct_bare(v, 1), True),
+)
+
+FLOW_COLUMNS = (
+    ("flow", "Akış", 7, money_compact, False),
+    ("investor_change", "Kişi", 6, signed_int, False),
 )
 
 
-def _returns_table(records: List[dict], numbered: bool = False) -> str:
+def _returns_table(
+    records: List[dict], numbered: bool = False, columns=RETURN_COLUMNS
+) -> str:
     """Monospace table of daily / 1-month / year-to-date returns.
 
     The best value in each column is prefixed with ``*``. The marker occupies a
@@ -162,7 +202,9 @@ def _returns_table(records: List[dict], numbered: bool = False) -> str:
     # Index of the row holding each column's best value. Only the first is
     # marked, so a column where several funds tie does not fill up with stars.
     best_row = {}
-    for key, _, _ in RETURN_COLUMNS:
+    for key, _, _, _, markable in columns:
+        if not markable:
+            continue
         ranked = [
             (_num(r.get(key)), i)
             for i, r in enumerate(records)
@@ -170,8 +212,10 @@ def _returns_table(records: List[dict], numbered: bool = False) -> str:
         ]
         best_row[key] = max(ranked)[1] if ranked else None
 
+    # Every column reserves one extra character so a marked cell lines up with
+    # the unmarked ones above and below it.
     header = "{:<{}}".format("Kod", label_width)
-    for _, title, width in RETURN_COLUMNS:
+    for _, title, width, _, _ in columns:
         header += "{:>{}}".format(title, width + 1)
     rows = [header]
 
@@ -182,19 +226,16 @@ def _returns_table(records: List[dict], numbered: bool = False) -> str:
             else (record.get("code") or "")
         )
         row = "{:<{}}".format(label[:label_width], label_width)
-        for key, _, width in RETURN_COLUMNS:
+        for key, _, width, fmt, markable in columns:
             # The marker is glued to the number, then the pair is right-aligned,
             # so it reads as belonging to that value rather than to the code.
-            cell = pct_bare(_num(record.get(key)))
-            if index == best_row[key]:
+            cell = fmt(_num(record.get(key)))
+            if markable and index == best_row.get(key):
                 cell = HIGHLIGHT + cell
             row += "{:>{}}".format(cell, width + 1)
         rows.append(row)
 
     return "<pre>" + esc("\n".join(rows)) + "</pre>"
-
-
-RETURNS_LEGEND = "<i>Değerler % · {} sütunun en iyisi</i>".format(HIGHLIGHT)
 
 
 # -- named ranking lists -----------------------------------------------------
@@ -231,19 +272,8 @@ def _watchlist_block(
     if not records:
         return [_block(title, "", "Takip listesi için veri yok.")]
 
-    body = _returns_table(records) + "\n" + RETURNS_LEGEND
-
-    if with_flow:
-        rows = ["{:<4}{:>12}{:>11}".format("Kod", "Akış", "Yatırımcı")]
-        for record in records:
-            rows.append(
-                "{:<4}{:>12}{:>11}".format(
-                    record.get("code") or "",
-                    money(record.get("flow"), signed=True),
-                    signed_count(record.get("investor_change")),
-                )
-            )
-        body += "\n<pre>" + esc("\n".join(rows)) + "</pre>"
+    columns = RETURN_COLUMNS + FLOW_COLUMNS if with_flow else RETURN_COLUMNS
+    body = _returns_table(records, columns=columns)
 
     if missing:
         body += "\n<i>Veri yok: {}</i>".format(esc(", ".join(missing)))
@@ -266,7 +296,7 @@ def _returns_ranking_block(
     if not top:
         return [_block(heading, "")]
 
-    body = _returns_table(top, numbered=True) + "\n" + RETURNS_LEGEND
+    body = _returns_table(top, numbered=True)
     body += "\n" + "\n".join(
         "<i>{}. {} — {}</i>".format(i, esc(r.get("code") or ""), esc(fund_name(r)))
         for i, r in enumerate(top, start=1)
@@ -280,7 +310,6 @@ def _platform_section(
     guard: Optional[str],
     flow_note: str,
     include_money_market: bool,
-    daily_only_headline: bool,
     sort_key: str = "daily_return",
 ) -> List[str]:
     segments = metrics.split_segments(records)
@@ -292,20 +321,9 @@ def _platform_section(
 
     general = segments["general"]
 
-    if daily_only_headline:
-        top = metrics.top_by(
-            general, sort_key, reverse=True, limit=config.TOP_N, guard=guard
-        )
-        blocks.append(
-            _block(
-                "🚀 EN İYİ GETİRİ",
-                _named_ranking(top, lambda r: percent(r.get(sort_key))),
-            )
-        )
-    else:
-        blocks += _returns_ranking_block(
-            "🚀 EN İYİ GETİRİ", general, config.TOP_N, guard, sort_key
-        )
+    blocks += _returns_ranking_block(
+        "🚀 EN İYİ GETİRİ", general, config.TOP_N, guard, sort_key
+    )
 
     blocks.append(
         _block(
@@ -337,6 +355,18 @@ def _platform_section(
                 _named_ranking(
                     metrics.top_by(general, "flow", reverse=False, limit=config.TOP_N),
                     lambda r: money(r.get("flow"), signed=True),
+                ),
+                flow_note,
+            )
+        )
+        blocks.append(
+            _block(
+                "👥 YATIRIMCI SAYISI EN ÇOK AZALAN",
+                _named_ranking(
+                    metrics.top_by(
+                        general, "investor_change", reverse=False, limit=config.TOP_N
+                    ),
+                    lambda r: "{} kişi".format(signed_int(r.get("investor_change"))),
                 ),
                 flow_note,
             )
@@ -440,7 +470,6 @@ def daily_report(
         "daily",
         flow_note,
         include_money_market=True,
-        daily_only_headline=True,
     )
     blocks += _platform_section(
         "🏛 BEFAS · EMEKLİLİK FONLARI",
@@ -448,7 +477,6 @@ def daily_report(
         "daily",
         flow_note,
         include_money_market=False,
-        daily_only_headline=False,
     )
 
     blocks += _kap_block(kap_items or [], kap_note)
@@ -485,7 +513,6 @@ def _period_report(
         "period",
         "Yeterli veri yok.",
         include_money_market=True,
-        daily_only_headline=False,
         sort_key="period_return",
     )
     blocks += _platform_section(
@@ -494,7 +521,6 @@ def _period_report(
         "period",
         "Yeterli veri yok.",
         include_money_market=False,
-        daily_only_headline=False,
         sort_key="period_return",
     )
     blocks.append(_footnote(len(records)))
