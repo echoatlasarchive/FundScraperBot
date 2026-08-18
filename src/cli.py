@@ -74,6 +74,22 @@ def store(records: List[dict], data_day: date) -> Tuple[date, bool]:
             )
             return previous_day, False
 
+        # Cross-check the inferred label against the price series. A mismatch
+        # means the clock-based guess is wrong -- typically a run made outside
+        # the publication window, which would silently corrupt the flow
+        # baseline by comparing a session against itself.
+        consecutive = storage.follows_consecutively(records, previous)
+        if consecutive is False:
+            log.warning(
+                "Fetched data does not look like the session right after %s, "
+                "but it is being labelled %s. Flow figures may be unreliable; "
+                "check the publication window.",
+                previous_day,
+                data_day,
+            )
+        elif consecutive:
+            log.info("Verified: fetched data is the session after %s.", previous_day)
+
     storage.save_snapshot(data_day, records)
     return data_day, True
 

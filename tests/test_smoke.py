@@ -210,16 +210,58 @@ class TestDateLogic(unittest.TestCase):
         wednesday = datetime(2026, 8, 19, 12, 0, tzinfo=storage.ISTANBUL)
         self.assertEqual(storage.data_date_for(wednesday), date(2026, 8, 18))
 
-    def test_late_evening_run_stays_on_the_same_trading_day(self):
-        # 02:15 Istanbul on Tuesday is still 23:15 UTC on Monday. Deriving the
-        # date from a UTC clock would report Friday instead of Monday and
-        # silently corrupt the flow baseline.
-        istanbul = datetime(2026, 8, 18, 2, 15, tzinfo=storage.ISTANBUL)
-        utc_equivalent = datetime(2026, 8, 17, 23, 15)
+    def test_the_clock_is_read_in_istanbul_not_utc(self):
+        # 12:03 Istanbul on Tuesday is 09:03 UTC the same day -- both after the
+        # publication window, so both resolve to Monday. But 00:30 Istanbul on
+        # Tuesday is 21:30 UTC on *Monday*, and reading that naive UTC stamp as
+        # a local time lands on the wrong calendar day entirely.
+        self.assertEqual(
+            storage.data_date_for(datetime(2026, 8, 18, 12, 3, tzinfo=storage.ISTANBUL)),
+            date(2026, 8, 17),
+        )
+        # Monday 00:30 in Istanbul is Sunday 21:30 UTC. Read as Istanbul time it
+        # is a pre-publication Monday, so the newest session is Thursday; read
+        # off a UTC clock it looks like a Sunday evening, giving Friday.
+        istanbul_small_hours = datetime(2026, 8, 17, 0, 30, tzinfo=storage.ISTANBUL)
+        utc_same_instant = datetime(2026, 8, 16, 21, 30)
+        self.assertEqual(storage.data_date_for(istanbul_small_hours), date(2026, 8, 13))
+        self.assertEqual(storage.data_date_for(utc_same_instant), date(2026, 8, 14))
 
-        self.assertEqual(storage.data_date_for(istanbul), date(2026, 8, 17))
-        self.assertNotEqual(
-            storage.data_date_for(istanbul), storage.data_date_for(utc_equivalent)
+    def test_run_before_publication_window_sees_an_older_session(self):
+        # Measured against the live API: at 03:09 on Tuesday 2026-08-18 TEFAS
+        # still served Friday's close, not Monday's.
+        early = datetime(2026, 8, 18, 3, 9, tzinfo=storage.ISTANBUL)
+        midday = datetime(2026, 8, 18, 12, 3, tzinfo=storage.ISTANBUL)
+
+        self.assertEqual(storage.data_date_for(early), date(2026, 8, 14))
+        self.assertEqual(storage.data_date_for(midday), date(2026, 8, 17))
+
+    def test_consecutive_sessions_are_recognised(self):
+        previous = {
+            "F{:03d}".format(i): make_record("F{:03d}".format(i), price=2.0)
+            for i in range(60)
+        }
+        # Every fund up 1.5%: prices and reported returns agree.
+        current = [
+            make_record(code, price=2.03, daily_return=1.5) for code in previous
+        ]
+        self.assertTrue(storage.follows_consecutively(current, previous))
+
+    def test_a_skipped_session_is_detected(self):
+        previous = {
+            "F{:03d}".format(i): make_record("F{:03d}".format(i), price=2.0)
+            for i in range(60)
+        }
+        # Prices moved 3% but each fund reports a 1.5% day: a session is missing.
+        current = [
+            make_record(code, price=2.06, daily_return=1.5) for code in previous
+        ]
+        self.assertFalse(storage.follows_consecutively(current, previous))
+
+    def test_too_little_overlap_is_inconclusive(self):
+        previous = {"AAA": make_record("AAA")}
+        self.assertIsNone(
+            storage.follows_consecutively([make_record("AAA")], previous)
         )
 
     def test_now_istanbul_is_three_hours_ahead_of_utc(self):

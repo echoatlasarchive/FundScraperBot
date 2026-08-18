@@ -127,24 +127,39 @@ def now_istanbul() -> datetime:
     return datetime.now(ISTANBUL)
 
 
-def data_date_for(run_dt: datetime) -> date:
-    """TEFAS publishes day T's prices on the morning of T+1.
+# TEFAS publishes the previous session's figures during the business morning,
+# not at midnight. Measured directly: at 03:09 on Tuesday 2026-08-18 the API
+# still served Friday's close, while at 12:03 the same day it served Monday's.
+# Runs before this hour therefore see one session *older* than the calendar
+# would suggest.
+PUBLICATION_HOUR_ISTANBUL = 10
 
-    A run on Monday reports Friday's data; any other weekday reports the day
-    before. Public holidays are not modelled -- they surface as an unchanged
-    snapshot, which :func:`fingerprint` detects.
+
+def previous_business_day(day: date, steps: int = 1) -> date:
+    for _ in range(steps):
+        day -= timedelta(days=1)
+        while day.weekday() >= 5:  # skip Sat/Sun
+            day -= timedelta(days=1)
+    return day
+
+
+def data_date_for(run_dt: datetime) -> date:
+    """Which trading session the data fetched *now* belongs to.
+
+    TEFAS serves a snapshot with no date attached, so the session has to be
+    inferred from the clock. After the morning publication window a run sees the
+    previous session; before it, the previous session is not out yet and the API
+    still serves the one before that.
 
     Pass a timezone-aware Istanbul timestamp taken once at the start of the run:
     the fetch takes several minutes, so recomputing this afterwards can cross
     midnight and attribute the data to a different day.
+
+    Public holidays are not modelled -- they surface as an unchanged snapshot,
+    which :func:`fingerprint` detects.
     """
-    day = run_dt.date()
-    step = 1
-    while True:
-        candidate = day - timedelta(days=step)
-        if candidate.weekday() < 5:  # Mon-Fri
-            return candidate
-        step += 1
+    steps = 1 if run_dt.hour >= PUBLICATION_HOUR_ISTANBUL else 2
+    return previous_business_day(run_dt.date(), steps)
 
 
 # -- paths -------------------------------------------------------------------
@@ -218,6 +233,37 @@ def snapshot_on_or_before(day: date) -> Optional[date]:
 
 
 # -- staleness ---------------------------------------------------------------
+
+
+def follows_consecutively(current: List[dict], previous: Dict[str, dict]) -> Optional[bool]:
+    """Is ``current`` the session immediately after ``previous``?
+
+    TEFAS attaches no date to its snapshot, so the label is inferred from the
+    clock -- and a run made outside the publication window infers it wrongly.
+    The price series settles the question independently: on consecutive sessions
+    the reported daily return reproduces the price ratio between the two
+    snapshots exactly.
+
+    Returns ``None`` when there is too little overlap to judge.
+    """
+    agree = total = 0
+    for code, record in ((r.get("code"), r) for r in current):
+        base = previous.get(code)
+        if not base:
+            continue
+        price_now = record.get("price")
+        price_before = base.get("price")
+        reported = record.get("daily_return")
+        if not price_now or not price_before or reported is None:
+            continue
+        implied = (price_now / price_before - 1.0) * 100.0
+        total += 1
+        if abs(implied - reported) < 0.02:
+            agree += 1
+
+    if total < 50:
+        return None
+    return agree / total > 0.8
 
 
 def fingerprint(records: List[dict]) -> str:
