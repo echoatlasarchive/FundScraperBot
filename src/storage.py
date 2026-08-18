@@ -15,7 +15,7 @@ import gzip
 import hashlib
 import json
 import logging
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -110,12 +110,33 @@ def build_records(
 # -- dates -------------------------------------------------------------------
 
 
+# Turkey has been on permanent UTC+3 since abolishing DST in 2016, so a fixed
+# offset is exact and avoids depending on a tz database being present on the CI
+# runner.
+ISTANBUL = timezone(timedelta(hours=3))
+
+
+def now_istanbul() -> datetime:
+    """Current time in the market's own timezone.
+
+    GitHub Actions runners are on UTC. Deriving the trading day from the runner
+    clock puts a run made in the Istanbul small hours on the wrong side of
+    midnight, which mislabels the snapshot and silently corrupts the flow
+    baseline.
+    """
+    return datetime.now(ISTANBUL)
+
+
 def data_date_for(run_dt: datetime) -> date:
     """TEFAS publishes day T's prices on the morning of T+1.
 
     A run on Monday reports Friday's data; any other weekday reports the day
     before. Public holidays are not modelled -- they surface as an unchanged
     snapshot, which :func:`fingerprint` detects.
+
+    Pass a timezone-aware Istanbul timestamp taken once at the start of the run:
+    the fetch takes several minutes, so recomputing this afterwards can cross
+    midnight and attribute the data to a different day.
     """
     day = run_dt.date()
     step = 1

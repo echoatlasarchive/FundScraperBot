@@ -311,13 +311,11 @@ def index_by_code(records: List[dict]) -> Dict[str, dict]:
 
 def coverage(records: List[dict]) -> dict:
     """Summary used to decide whether a section has enough data to be printed."""
-    total = len(records)
-    with_aum = sum(1 for r in records if _num(r.get("aum")) is not None)
-    with_flow = sum(1 for r in records if _num(r.get("flow")) is not None)
-    eligible = sum(1 for r in records if passes_size_filter(r))
     return {
-        "total": total,
-        "with_aum": with_aum,
-        "with_flow": with_flow,
-        "eligible": eligible,
+        "total": len(records),
+        "with_aum": sum(1 for r in records if _num(r.get("aum")) is not None),
+        "with_flow": sum(1 for r in records if _num(r.get("flow")) is not None),
+        "big_enough": sum(1 for r in records if passes_size_filter(r)),
+        # The number that actually reaches the rankings -- both filters applied.
+        "eligible": len(eligible_universe(records)),
     }

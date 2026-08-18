@@ -105,8 +105,14 @@ def _baseline(current_day: date, days_back: Optional[int]) -> Tuple[Optional[dat
 
 
 def run_daily(args) -> str:
+    # Pin the clock before fetching: collect() runs for several minutes, and a
+    # run started late in the Istanbul evening would otherwise cross midnight
+    # and file the data under the wrong trading day.
+    run_dt = storage.now_istanbul()
+    data_day = storage.data_date_for(run_dt)
+    log.info("Run at %s (Istanbul) -> trading day %s", run_dt.isoformat(timespec="seconds"), data_day)
+
     records = collect()
-    data_day = storage.data_date_for(datetime.now())
     effective_day, is_new = store(records, data_day)
 
     if not is_new:
@@ -123,7 +129,7 @@ def run_daily(args) -> str:
     return formatter.daily_report(
         records=records,
         data_day=effective_day,
-        run_day=date.today(),
+        run_day=run_dt.date(),
         baseline_day=baseline_day,
         kap_items=kap_items,
         kap_note=kap_note,
@@ -157,8 +163,8 @@ def run_monthly(args) -> str:
 
 
 def run_fetch(args) -> Optional[str]:
+    data_day = storage.data_date_for(storage.now_istanbul())
     records = collect(watchlist_only=args.watchlist_only)
-    data_day = storage.data_date_for(datetime.now())
     effective_day, is_new = store(records, data_day)
     log.info("Stored %s (new data: %s).", effective_day, is_new)
     return None

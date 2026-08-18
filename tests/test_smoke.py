@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import sys
 import unittest
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -203,12 +203,29 @@ class TestSegmentation(unittest.TestCase):
 
 class TestDateLogic(unittest.TestCase):
     def test_monday_run_reports_friday(self):
-        monday = datetime(2026, 8, 17, 12, 0)
+        monday = datetime(2026, 8, 17, 12, 0, tzinfo=storage.ISTANBUL)
         self.assertEqual(storage.data_date_for(monday), date(2026, 8, 14))
 
     def test_midweek_run_reports_previous_day(self):
-        wednesday = datetime(2026, 8, 19, 12, 0)
+        wednesday = datetime(2026, 8, 19, 12, 0, tzinfo=storage.ISTANBUL)
         self.assertEqual(storage.data_date_for(wednesday), date(2026, 8, 18))
+
+    def test_late_evening_run_stays_on_the_same_trading_day(self):
+        # 02:15 Istanbul on Tuesday is still 23:15 UTC on Monday. Deriving the
+        # date from a UTC clock would report Friday instead of Monday and
+        # silently corrupt the flow baseline.
+        istanbul = datetime(2026, 8, 18, 2, 15, tzinfo=storage.ISTANBUL)
+        utc_equivalent = datetime(2026, 8, 17, 23, 15)
+
+        self.assertEqual(storage.data_date_for(istanbul), date(2026, 8, 17))
+        self.assertNotEqual(
+            storage.data_date_for(istanbul), storage.data_date_for(utc_equivalent)
+        )
+
+    def test_now_istanbul_is_three_hours_ahead_of_utc(self):
+        now = storage.now_istanbul()
+        self.assertIsNotNone(now.tzinfo)
+        self.assertEqual(now.utcoffset(), timedelta(hours=3))
 
 
 class TestReportRendering(unittest.TestCase):
