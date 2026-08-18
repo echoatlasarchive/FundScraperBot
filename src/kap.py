@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import logging
 import re
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Dict, List, Optional, Sequence, Tuple
 
 import requests
@@ -43,6 +43,7 @@ except ImportError:  # pragma: no cover - depends on the environment
 
 class _EmptyTable(Exception):
     """The filter repainted no rows -- worth one retry before believing it."""
+
 
 ENABLED = sync_playwright is not None
 
@@ -124,15 +125,22 @@ def resolve_slug(
 # -- date handling -----------------------------------------------------------
 
 
-def window_start(today: date) -> date:
-    """Earliest disclosure date to report on.
+REPORT_HOUR = 12
 
-    The report covers yesterday and today. On a Monday that reaches back to the
-    previous Friday instead, so disclosures published after Friday's report --
-    on Friday evening or over the weekend -- are not skipped. Stepping back one
-    *business* day gives exactly that: Friday on a Monday, yesterday otherwise.
+
+def window_start(today: date) -> datetime:
+    """Earliest disclosure timestamp to report on.
+
+    The report goes out at noon, so the window runs from noon on the previous
+    report day to now -- picking up exactly what was published since the last
+    message, with no gap and no repeats.
+
+    Stepping back one *business* day gives the right answer on both kinds of
+    day: yesterday noon normally, and Friday noon on a Monday, so anything filed
+    on Friday afternoon or over the weekend is still caught.
     """
-    return storage.previous_business_day(today)
+    previous = storage.previous_business_day(today)
+    return datetime(previous.year, previous.month, previous.day, REPORT_HOUR)
 
 
 def parse_row_date(text: str, today: date) -> Optional[date]:
@@ -161,13 +169,25 @@ def _row_time(text: str) -> str:
     return match.group(1) if match else ""
 
 
+def parse_row_datetime(text: str, today: date) -> Optional[datetime]:
+    """Full timestamp for a row, so the noon-to-noon window can be applied."""
+    day = parse_row_date(text, today)
+    if day is None:
+        return None
+    clock = _row_time(text)
+    hour, minute = (int(part) for part in clock.split(":")) if clock else (0, 0)
+    return datetime(day.year, day.month, day.day, hour, minute)
+
+
 # -- list scraping (headless browser) ----------------------------------------
 
 # Column order of the disclosure table.
 COL_DATE, COL_CODE, COL_FUND, COL_TYPE, COL_SUBJECT, COL_SUMMARY = 2, 3, 4, 5, 6, 7
 
 
-def _scrape_fund_rows(page, url: str, code: str, today: date, since: date) -> List[dict]:
+def _scrape_fund_rows(
+    page, url: str, code: str, today: date, since: datetime
+) -> List[dict]:
     # Not "networkidle": the page keeps firing analytics and bot-detection
     # beacons, so the network never goes quiet and the wait always times out.
     # Waiting for the controls themselves is both faster and reliable.
@@ -183,15 +203,23 @@ def _scrape_fund_rows(page, url: str, code: str, today: date, since: date) -> Li
     page.wait_for_timeout(500)
     page.keyboard.press("Escape")
     page.wait_for_timeout(300)
-    page.locator("button.filter-btn").first.click()
+    # The filter repaint is unreliable: the same fund sometimes renders nothing
+    # for fifteen seconds and then fifty rows on the next attempt. Pressing the
+    # button again is what shakes it loose.
+    rendered = False
+    for _ in range(3):
+        page.locator("button.filter-btn").first.click()
+        try:
+            page.wait_for_function(
+                "() => document.querySelectorAll('table tbody tr').length > 1",
+                timeout=15_000,
+            )
+            rendered = True
+            break
+        except Exception:  # noqa: BLE001 - try pressing the filter once more
+            continue
 
-    # The filter repaints the table; give the rows a moment to arrive.
-    try:
-        page.wait_for_function(
-            "() => document.querySelectorAll('table tbody tr').length > 1",
-            timeout=30_000,
-        )
-    except Exception:  # noqa: BLE001 - either no disclosures, or a flaky repaint
+    if not rendered:
         raise _EmptyTable(code)
     page.wait_for_timeout(1_500)
 
@@ -208,30 +236,35 @@ def _scrape_fund_rows(page, url: str, code: str, today: date, since: date) -> Li
             return " ".join(cells.nth(i).inner_text().split())
 
         raw_date = cell(COL_DATE)
-        published = parse_row_date(raw_date, today)
+        published = parse_row_datetime(raw_date, today)
         if published is None:
             continue
         if published < since:
             # Rows are newest first, so everything below is older still.
             break
-        if cell(COL_CODE).upper() != code.upper():
-            # The page also lists platform-wide announcements with no fund code.
-            continue
-
         checkbox = row.locator("input[type=checkbox]").first
         disclosure_id = checkbox.get_attribute("id") if checkbox.count() else None
         if not disclosure_id:
             continue
 
+        # No filtering on the Kod column. Some of the most relevant rows are
+        # platform-wide announcements ("Kamuyu Aydınlatma Platformu Duyurusu")
+        # that carry the PDF but leave Kod blank, naming the funds involved in
+        # the "İlgili Şirketler" column instead. Requiring Kod to match dropped
+        # exactly those. The page only lists disclosures concerning this fund,
+        # so being on it is qualification enough.
         found.append(
             {
                 "code": code,
+                "row_code": cell(COL_CODE),
                 "id": disclosure_id,
-                "date": published,
+                "published": published,
+                "date": published.date(),
                 "time": _row_time(raw_date),
                 "type": cell(COL_TYPE),
                 "subject": cell(COL_SUBJECT),
                 "summary": cell(COL_SUMMARY),
+                "issuer": cell(COL_FUND),
             }
         )
 
@@ -359,9 +392,39 @@ def fetch_disclosures(
 
     storage.write_state(SLUG_CACHE, cache)
 
+    # A platform-wide announcement shows up on every fund page it concerns, so
+    # collapse by disclosure id and remember which watched funds it came from.
+    unique: Dict[str, dict] = {}
     for item in results:
+        existing = unique.get(item["id"])
+        if existing:
+            if item["code"] not in existing["funds"]:
+                existing["funds"].append(item["code"])
+            continue
+        item["funds"] = [item["code"]]
+        unique[item["id"]] = item
+
+    # Attachment presence is only known from the disclosure page, so every
+    # in-window row is fetched and then filtered. Routine filings without a
+    # document are noise -- only the ones carrying a PDF are reported.
+    with_files: List[dict] = []
+    for item in unique.values():
         enrich(session, item)
         item["url"] = DISCLOSURE_PAGE.format(id=item["id"])
+        if item.get("attachments"):
+            with_files.append(item)
+        else:
+            log.info(
+                "KAP %s %s: no attachment, skipped.",
+                "/".join(item["funds"]),
+                item["published"].strftime("%d.%m %H:%M"),
+            )
 
-    results.sort(key=lambda i: (i["date"], i.get("time") or ""), reverse=True)
-    return results
+    with_files.sort(key=lambda i: i["published"], reverse=True)
+    log.info(
+        "KAP: %d row(s) in window, %d unique, %d with an attachment.",
+        len(results),
+        len(unique),
+        len(with_files),
+    )
+    return with_files

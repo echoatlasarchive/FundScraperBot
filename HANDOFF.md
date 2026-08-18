@@ -34,7 +34,7 @@ unlimited and free. Nothing secret lives in the code.
 | Repo | https://github.com/echoatlasarchive/FundScraperBot |
 | Workflows | `daily.yml` (weekdays 09:00 UTC), `periodic.yml` (Mon + 1st) |
 | Secrets set | `TELEGRAM_TOKEN`, `TELEGRAM_CHAT_ID` |
-| Tests | 40, `python -m unittest discover -s tests` |
+| Tests | 43, `python -m unittest discover -s tests` |
 | History | Building from scratch; see §4 |
 
 **Watchlists** (`src/config.py`): TEFAS `PHE TLY KHA THF` · money market
@@ -229,6 +229,19 @@ touching it, because most of this was found the hard way:
 * Attachment links are `/tr/api/file/download/<id>`. KAP prefixes the response
   with 27 bytes of Java serialization header before `%PDF` — its own quirk, the
   same as on KAP's site, and harmless since the bot only links to the file.
+* **Do not filter rows on the Kod column.** The most useful rows are often
+  platform-wide announcements ("Kamuyu Aydınlatma Platformu Duyurusu", type
+  DKB/PSP) that carry the PDF but leave Kod blank, naming the funds in "İlgili
+  Şirketler" instead. An early version required `Kod == fund code` and silently
+  dropped exactly those. The fund page only lists disclosures concerning that
+  fund, so appearing on it is qualification enough — but dedupe by disclosure
+  id, since one announcement shows up under several funds.
+* Only disclosures **with an attachment** are reported, and the window runs from
+  **noon on the previous report day to now** — the report goes out at noon, so
+  this is precisely "everything since the last message".
+* The filter repaint is flaky: a fund can render nothing for fifteen seconds and
+  fifty rows on the next press. The button is pressed up to three times before
+  an empty table is believed.
 
 ## 7. Open items
 

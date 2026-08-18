@@ -399,15 +399,24 @@ if __name__ == "__main__":
 
 
 class TestKapWindow(unittest.TestCase):
-    def test_monday_reaches_back_to_friday(self):
-        # Friday's evening and weekend disclosures land after Friday's report
-        # went out, so Monday has to cover them too.
-        monday = date(2026, 8, 17)
-        self.assertEqual(kap.window_start(monday), date(2026, 8, 14))
-
-    def test_other_days_cover_yesterday(self):
+    def test_window_runs_from_noon_on_the_previous_report_day(self):
+        # The report goes out at noon, so the window starts where the last one
+        # ended: no gap, no repeats.
         tuesday = date(2026, 8, 18)
-        self.assertEqual(kap.window_start(tuesday), date(2026, 8, 17))
+        self.assertEqual(kap.window_start(tuesday), datetime(2026, 8, 17, 12, 0))
+
+    def test_monday_reaches_back_to_friday_noon(self):
+        # Nothing filed on Friday afternoon or over the weekend may be dropped.
+        monday = date(2026, 8, 17)
+        self.assertEqual(kap.window_start(monday), datetime(2026, 8, 14, 12, 0))
+
+    def test_row_timestamps_decide_the_window(self):
+        today = date(2026, 8, 18)
+        start = kap.window_start(today)
+        # 08:58 yesterday belongs to the previous report; 17:53 yesterday does not.
+        self.assertLess(kap.parse_row_datetime("Dün 08:58", today), start)
+        self.assertGreater(kap.parse_row_datetime("Dün 17:53", today), start)
+        self.assertGreater(kap.parse_row_datetime("Bugün 08:55", today), start)
 
     def test_relative_dates(self):
         today = date(2026, 8, 18)
@@ -430,6 +439,30 @@ class TestKapWindow(unittest.TestCase):
     def test_slug_folds_both_turkish_i_forms(self):
         # TEFAS writes ZURICH with a Latin I, KAP writes ZURİCH with a dotted one.
         self.assertEqual(kap._slugify("ZURICH"), kap._slugify("ZURİCH"))
+
+    def test_platform_announcements_are_not_filtered_out_by_code(self):
+        # The rows worth reporting are often platform-wide announcements that
+        # carry the PDF but leave the Kod column blank, naming the funds in
+        # "İlgili Şirketler" instead. Filtering on Kod dropped exactly those.
+        item = {"code": "TLY", "row_code": "", "funds": ["TLY"],
+                "published": datetime(2026, 8, 18, 8, 55),
+                "date": date(2026, 8, 18), "time": "08:55",
+                "subject": "Kamuyu Aydınlatma Platformu Duyurusu",
+                "summary": "Özel Durumlar Tebliği'nin 12-(4). maddesi",
+                "attachments": ["https://www.kap.org.tr/tr/api/file/download/abc"],
+                "url": "https://www.kap.org.tr/tr/Bildirim/1"}
+        block = formatter._kap_block([item])[0]
+        self.assertIn("TLY", block)
+        self.assertIn("file/download/abc", block)
+
+    def test_one_announcement_shared_by_several_funds_is_labelled_once(self):
+        item = {"funds": ["TLY", "PRY"], "code": "TLY",
+                "published": datetime(2026, 8, 18, 8, 55),
+                "date": date(2026, 8, 18), "time": "08:55",
+                "subject": "Duyuru", "summary": "",
+                "attachments": ["https://x/y"], "url": "https://z"}
+        block = formatter._kap_block([item])[0]
+        self.assertIn("TLY/PRY", block)
 
     def test_shell_page_is_not_mistaken_for_a_fund_page(self):
         # An unknown slug still answers 200 with a small shell.

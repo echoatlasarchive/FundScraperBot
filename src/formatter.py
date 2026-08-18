@@ -377,11 +377,14 @@ def _kap_block(items: List[dict], note: Optional[str] = None) -> List[str]:
         if item.get("time"):
             when = "{} {}".format(when, item["time"]).strip()
 
-        head = "<b>{}</b> · {}".format(esc(item.get("code") or ""), esc(when))
+        # A platform-wide announcement can concern several watched funds at once.
+        who = "/".join(item.get("funds") or [item.get("code") or ""])
         if item.get("url"):
             head = '<b>{}</b> · <a href="{}">{}</a>'.format(
-                esc(item.get("code") or ""), esc(item["url"]), esc(when)
+                esc(who), esc(item["url"]), esc(when)
             )
+        else:
+            head = "<b>{}</b> · {}".format(esc(who), esc(when))
         lines.append(head)
         lines.append(esc(item.get("subject") or "Bildirim"))
 
