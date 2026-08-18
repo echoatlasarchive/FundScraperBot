@@ -27,7 +27,7 @@ def make_record(code, **overrides):
         "daily_return": 1.0,
         "shares": 1_000_000_000,
         "aum": 2_000_000_000.0,
-        "investors": 10_000,  # comfortably above config.MIN_INVESTORS
+        "investors": 20_000,  # comfortably above config.MIN_INVESTORS
         "market_share": 1.5,
         "cat_rank": 3,
         "cat_count": 197,
@@ -292,6 +292,10 @@ class TestReportRendering(unittest.TestCase):
             for i in range(20)
         ]
         records += [
+            make_record(code, fund_type="EMK", daily_return=0.4)
+            for code in config.BEFAS_WATCHLIST
+        ]
+        records += [
             make_record(
                 "G{:03d}".format(i),
                 name="PORTFÖY ALTIN FONU {}".format(i),
@@ -304,16 +308,16 @@ class TestReportRendering(unittest.TestCase):
         return metrics.attach_deltas(records, {})
 
     def test_daily_report_renders_without_baseline(self):
-        text = formatter.daily_report(
+        text = formatter.render(formatter.daily_report(
             records=self._records(),
             data_day=date(2026, 8, 17),
             run_day=date(2026, 8, 18),
             baseline_day=None,
             kap_note="KAP kapalı.",
-        )
+        ))
         self.assertIn("TAKİP LİSTEM", text)
-        self.assertIn("Para Piyasası", text)
-        self.assertIn("Kıymetli Madenler", text)
+        self.assertIn("PARA PİYASASI", text)
+        self.assertIn("KIYMETLİ MADENLER", text)
         self.assertIn("TEFAS · YATIRIM FONLARI", text)
         self.assertIn("BEFAS · EMEKLİLİK FONLARI", text)
         self.assertIn("ilk kayıt", text)      # day-one explanation
@@ -334,7 +338,7 @@ class TestReportRendering(unittest.TestCase):
             for r in self._records()
         }
         records = metrics.attach_deltas(self._records(), previous)
-        text = formatter.daily_report(
+        blocks = formatter.daily_report(
             records=records,
             data_day=date(2026, 8, 17),
             run_day=date(2026, 8, 18),
@@ -343,44 +347,50 @@ class TestReportRendering(unittest.TestCase):
         # A tighter limit forces several splits regardless of how long the
         # synthetic fund names happen to make the report.
         limit = 1500
-        chunks = formatter.split_for_telegram(text, limit=limit)
+        chunks = formatter.split_for_telegram(blocks, limit=limit)
 
         self.assertGreater(len(chunks), 2)
         for chunk in chunks:
             self.assertLessEqual(len(chunk), limit)
             self.assertEqual(chunk.count("<pre>"), chunk.count("</pre>"))
         # Nothing is silently dropped on the way out.
+        whole = formatter.render(blocks)
         self.assertEqual(
-            sum(c.count("<pre>") for c in chunks), text.count("<pre>")
+            sum(c.count("<pre>") for c in chunks), whole.count("<pre>")
         )
 
-    def test_split_keeps_a_table_intact(self):
-        table = "<pre>" + "\n".join("row {}".format(i) for i in range(10)) + "</pre>"
-        text = "\n".join(["header", table, "x" * 4000, "footer"])
-        for chunk in formatter.split_for_telegram(text):
-            self.assertLessEqual(len(chunk), formatter.TELEGRAM_LIMIT)
-            if "<pre>" in chunk:
-                self.assertIn("row 9", chunk)
-                self.assertIn("</pre>", chunk)
+    def test_split_never_separates_a_heading_from_its_table(self):
+        # A block is a heading plus its table. The splitter must keep them
+        # together, or a message ends on a bare heading.
+        blocks = [
+            "<b>BASLIK {}</b>\n<pre>satir {}</pre>".format(i, i) for i in range(12)
+        ]
+        chunks = formatter.split_for_telegram(blocks, limit=200)
+
+        self.assertGreater(len(chunks), 1)
+        for chunk in chunks:
+            self.assertEqual(chunk.count("<b>"), chunk.count("<pre>"))
+            self.assertEqual(chunk.count("<pre>"), chunk.count("</pre>"))
+            self.assertFalse(chunk.rstrip().endswith("</b>"))
 
     def test_watchlist_codes_all_appear(self):
-        text = formatter.daily_report(
+        text = formatter.render(formatter.daily_report(
             records=self._records(),
             data_day=date(2026, 8, 17),
             run_day=date(2026, 8, 18),
             baseline_day=None,
-        )
+        ))
         for code in config.ALL_WATCHED:
             self.assertIn(code, text)
 
     def test_metals_do_not_leak_into_the_headline_table(self):
-        text = formatter.daily_report(
+        text = formatter.render(formatter.daily_report(
             records=self._records(),
             data_day=date(2026, 8, 17),
             run_day=date(2026, 8, 18),
             baseline_day=None,
-        )
-        headline = text.split("🥇")[0].split("🏦 Para Piyasası")[0]
+        ))
+        headline = text.split("🥇")[0].split("🏦 PARA PİYASASI")[0]
         self.assertNotIn("G011", headline)  # best-performing gold fund
 
 

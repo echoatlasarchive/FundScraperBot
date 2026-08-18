@@ -1,16 +1,29 @@
 """Turkish-language message rendering for Telegram.
 
 This is the only module that speaks Turkish; everything upstream stays in
-English. Output uses Telegram's HTML parse mode. Ranking tables go inside
-``<pre>`` blocks so columns line up in the phone's monospace font -- lines are
-kept under ~42 characters to avoid horizontal scrolling.
+English. Output uses Telegram's HTML parse mode.
+
+Reports are built as a list of *blocks*. A block is one heading together with
+the table beneath it, and the splitter never cuts one in half -- otherwise a
+heading can end up stranded at the bottom of one message with its table at the
+top of the next.
+
+Two table shapes are used:
+
+* Numeric comparisons go in ``<pre>`` blocks so columns line up in the phone's
+  monospace font. Lines stay under ~40 characters to avoid horizontal scrolling,
+  and the best value in each column is marked with ``*`` -- Telegram does not
+  render nested formatting inside ``<pre>``, and an ASCII marker is the only one
+  guaranteed not to disturb the alignment.
+* Rankings that carry a fund's full name use two lines per entry instead, since
+  those names run to seventy characters and would wreck any fixed-width layout.
 """
 
 from __future__ import annotations
 
 import html
 from datetime import date
-from typing import List, Optional
+from typing import Callable, List, Optional
 
 from . import config, metrics
 
@@ -24,6 +37,8 @@ DAYS_TR = [
     "Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi", "Pazar",
 ]
 
+HIGHLIGHT = "*"
+
 
 # -- primitives --------------------------------------------------------------
 
@@ -31,7 +46,7 @@ DAYS_TR = [
 def tr_date(day: date, with_weekday: bool = False) -> str:
     text = "{} {} {}".format(day.day, MONTHS_TR[day.month - 1], day.year)
     if with_weekday:
-        text += ", " + DAYS_TR[day.weekday()]
+        text += " " + DAYS_TR[day.weekday()]
     return text
 
 
@@ -51,16 +66,12 @@ def money(value: Optional[float], signed: bool = False) -> str:
         sign = "+" if value > 0 else ("−" if value < 0 else "±")
     magnitude = abs(value)
 
-    for threshold, suffix in (
-        (1_000_000_000, "Mr₺"),
-        (1_000_000, "Mn₺"),
-        (1_000, "B₺"),
-    ):
-        if magnitude >= threshold:
-            scaled = magnitude / threshold
-            # Drop a pointless ",0" so a round threshold reads "100 Mn₺".
-            decimals = 0 if abs(scaled - round(scaled)) < 0.05 else 1
-            return "{}{} {}".format(sign, tr_number(scaled, decimals), suffix)
+    if magnitude >= 1_000_000_000:
+        return "{}{} Mr₺".format(sign, tr_number(magnitude / 1_000_000_000, 1))
+    if magnitude >= 1_000_000:
+        return "{}{} Mn₺".format(sign, tr_number(magnitude / 1_000_000, 1))
+    if magnitude >= 1_000:
+        return "{}{} B₺".format(sign, tr_number(magnitude / 1_000, 1))
     return "{}{} ₺".format(sign, tr_number(magnitude, 0))
 
 
@@ -71,6 +82,14 @@ def percent(value: Optional[float], decimals: int = 2, signed: bool = True) -> s
     if signed:
         sign = "+" if value > 0 else ("−" if value < 0 else "")
     return "{}%{}".format(sign, tr_number(abs(value), decimals))
+
+
+def pct_bare(value: Optional[float], decimals: int = 2) -> str:
+    """Percentage without the sign glyph, for use inside aligned tables."""
+    if value is None:
+        return "—"
+    sign = "+" if value > 0 else ("-" if value < 0 else " ")
+    return "{}{}".format(sign, tr_number(abs(value), decimals))
 
 
 def count(value: Optional[float]) -> str:
@@ -95,7 +114,7 @@ def signed_count(value: Optional[float]) -> str:
     return "{}{}".format(arrow(value), count(value))
 
 
-def short_category(record: dict, width: int = 13) -> str:
+def short_category(record: dict, width: int = 11) -> str:
     text = (record.get("category") or record.get("umbrella") or "").strip()
     for suffix in (" Şemsiye Fonu", " Fonu", " Fon"):
         if text.endswith(suffix):
@@ -106,233 +125,274 @@ def short_category(record: dict, width: int = 13) -> str:
     return text
 
 
+def fund_name(record: dict) -> str:
+    return (record.get("name") or "").strip()
+
+
 def esc(text: str) -> str:
     return html.escape(text or "", quote=False)
 
 
-# -- sections ----------------------------------------------------------------
+def _num(value):
+    if value is None or value == "":
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
-def _watchlist_block(records_by_code: dict, codes: List[str], title: str) -> List[str]:
-    lines = ["", "<b>{}</b>".format(title)]
-    for code in codes:
-        record = records_by_code.get(code)
-        if not record:
-            lines.append("<code>{}</code> — veri yok".format(code))
-            continue
+# -- returns table (code + daily / 1m / YTD, best marked) ---------------------
 
-        lines.append(
-            "<b>{}</b> · {}".format(esc(code), esc(short_category(record, 24)))
+RETURN_COLUMNS = (
+    ("daily_return", "Günlük", 8),
+    ("ret_1m", "1 Ay", 8),
+    ("ret_ytd", "Yılbaşı", 9),
+)
+
+
+def _returns_table(records: List[dict], numbered: bool = False) -> str:
+    """Monospace table of daily / 1-month / year-to-date returns.
+
+    The best value in each column is prefixed with ``*``. The marker occupies a
+    fixed slot in every cell so that marking a value never shifts the column.
+    """
+    label_width = 6 if numbered else 4
+
+    # Index of the row holding each column's best value. Only the first is
+    # marked, so a column where several funds tie does not fill up with stars.
+    best_row = {}
+    for key, _, _ in RETURN_COLUMNS:
+        ranked = [
+            (_num(r.get(key)), i)
+            for i, r in enumerate(records)
+            if _num(r.get(key)) is not None
+        ]
+        best_row[key] = max(ranked)[1] if ranked else None
+
+    header = "{:<{}}".format("Kod", label_width)
+    for _, title, width in RETURN_COLUMNS:
+        header += "{:>{}}".format(title, width + 1)
+    rows = [header]
+
+    for index, record in enumerate(records):
+        label = (
+            "{}.{}".format(index + 1, record.get("code") or "")
+            if numbered
+            else (record.get("code") or "")
         )
+        row = "{:<{}}".format(label[:label_width], label_width)
+        for key, _, width in RETURN_COLUMNS:
+            # The marker is glued to the number, then the pair is right-aligned,
+            # so it reads as belonging to that value rather than to the code.
+            cell = pct_bare(_num(record.get(key)))
+            if index == best_row[key]:
+                cell = HIGHLIGHT + cell
+            row += "{:>{}}".format(cell, width + 1)
+        rows.append(row)
+
+    return "<pre>" + esc("\n".join(rows)) + "</pre>"
+
+
+RETURNS_LEGEND = "<i>Değerler % · {} sütunun en iyisi</i>".format(HIGHLIGHT)
+
+
+# -- named ranking lists -----------------------------------------------------
+
+
+def _named_ranking(records: List[dict], value_fmt: Callable[[dict], str]) -> str:
+    """Two lines per fund: rank, code and value, then the full fund name."""
+    lines = []
+    for index, record in enumerate(records, start=1):
         lines.append(
-            "  {} │ {} │ {} kişi".format(
-                percent(record.get("daily_return")),
-                money(record.get("aum")),
-                count(record.get("investors")),
+            "<b>{}. {}</b> · {}".format(
+                index, esc(record.get("code") or ""), value_fmt(record)
             )
         )
+        lines.append("<i>{}</i>".format(esc(fund_name(record))))
+    return "\n".join(lines)
 
-        flow = record.get("flow")
-        if flow is not None:
-            lines.append(
-                "  Akış {} ({}) · Yatırımcı {}".format(
-                    money(flow, signed=True),
-                    percent(record.get("flow_pct")),
+
+def _block(heading: str, body: str, empty_note: str = "Yeterli veri yok.") -> str:
+    if not body:
+        return "<b>{}</b>\n<i>{}</i>".format(heading, esc(empty_note))
+    return "<b>{}</b>\n{}".format(heading, body)
+
+
+# -- watchlist ---------------------------------------------------------------
+
+
+def _watchlist_block(
+    by_code: dict, codes: List[str], title: str, with_flow: bool
+) -> List[str]:
+    records = [by_code[c] for c in codes if c in by_code]
+    missing = [c for c in codes if c not in by_code]
+
+    if not records:
+        return [_block(title, "", "Takip listesi için veri yok.")]
+
+    body = _returns_table(records) + "\n" + RETURNS_LEGEND
+
+    if with_flow:
+        rows = ["{:<4}{:>12}{:>11}".format("Kod", "Akış", "Yatırımcı")]
+        for record in records:
+            rows.append(
+                "{:<4}{:>12}{:>11}".format(
+                    record.get("code") or "",
+                    money(record.get("flow"), signed=True),
                     signed_count(record.get("investor_change")),
                 )
             )
+        body += "\n<pre>" + esc("\n".join(rows)) + "</pre>"
 
-        rank, total = record.get("cat_rank"), record.get("cat_count")
-        extras = []
-        if rank and total:
-            extras.append("Kategoride {}/{}".format(int(rank), int(total)))
-        if record.get("market_share"):
-            extras.append("Pazar payı {}".format(percent(record["market_share"], 2, signed=False)))
-        if extras:
-            lines.append("  " + " · ".join(extras))
-    return lines
+    if missing:
+        body += "\n<i>Veri yok: {}</i>".format(esc(", ".join(missing)))
+
+    return [_block(title, body)]
 
 
-def _ranking_block(
-    title: str,
+# -- platform sections -------------------------------------------------------
+
+
+def _returns_ranking_block(
+    heading: str,
     records: List[dict],
-    value_key: str,
-    formatter,
-    empty_note: str = "Yeterli veri yok.",
-) -> List[str]:
-    lines = ["", "<b>{}</b>".format(title)]
-    if not records:
-        lines.append("<i>{}</i>".format(empty_note))
-        return lines
-
-    rows = []
-    for index, record in enumerate(records, start=1):
-        rows.append(
-            "{:>2} {:<4}{:>9}{:>10}  {}".format(
-                index,
-                (record.get("code") or "")[:4],
-                formatter(record.get(value_key)),
-                money(record.get("aum")),
-                short_category(record),
-            )
-        )
-    lines.append("<pre>" + esc("\n".join(rows)) + "</pre>")
-    return lines
-
-
-def _flow_ranking_block(title: str, records: List[dict], empty_note: str) -> List[str]:
-    lines = ["", "<b>{}</b>".format(title)]
-    if not records:
-        lines.append("<i>{}</i>".format(empty_note))
-        return lines
-
-    rows = []
-    for index, record in enumerate(records, start=1):
-        rows.append(
-            "{:>2} {:<4}{:>11}{:>8}  {}".format(
-                index,
-                (record.get("code") or "")[:4],
-                money(record.get("flow"), signed=True),
-                percent(record.get("flow_pct"), 1),
-                money(record.get("aum")),
-            )
-        )
-    lines.append("<pre>" + esc("\n".join(rows)) + "</pre>")
-    lines.append("<i>Sütunlar: net akış · AUM'a oranı · fon büyüklüğü</i>")
-    return lines
-
-
-def _kap_block(items: List[dict], note: Optional[str] = None) -> List[str]:
-    lines = ["", "<b>📄 KAP BİLDİRİMLERİ</b>"]
-    if not items:
-        lines.append("<i>{}</i>".format(esc(note or "Takip listende yeni bildirim yok.")))
-        return lines
-    for item in items:
-        stamp = item.get("published") or ""
-        title = esc(item.get("title") or "Bildirim")
-        code = esc(item.get("code") or "")
-        url = item.get("url")
-        text = "• <b>{}</b> — {}".format(code, title)
-        if stamp:
-            text += " <i>({})</i>".format(esc(stamp))
-        if url:
-            text += ' <a href="{}">→</a>'.format(esc(url))
-        lines.append(text)
-    return lines
-
-
-# -- reports -----------------------------------------------------------------
-
-
-def _segment_tables(
-    records: List[dict],
-    value_key: str,
-    value_fmt,
-    guard: Optional[str],
-    flow_note: str,
     limit: int,
-    titles: dict,
+    guard: Optional[str],
+    sort_key: str = "daily_return",
 ) -> List[str]:
-    """The four tables every segment gets: best, worst, inflow, outflow."""
-    lines: List[str] = []
-    lines += _ranking_block(
-        titles["best"],
-        metrics.top_by(records, value_key, reverse=True, limit=limit, guard=guard),
-        value_key,
-        value_fmt,
-    )
-    lines += _ranking_block(
-        titles["worst"],
-        metrics.top_by(records, value_key, reverse=False, limit=limit, guard=guard),
-        value_key,
-        value_fmt,
-    )
-    lines += _flow_ranking_block(
-        titles["inflow"],
-        metrics.top_by(records, "flow", reverse=True, limit=limit),
-        flow_note,
-    )
-    lines += _flow_ranking_block(
-        titles["outflow"],
-        metrics.top_by(records, "flow", reverse=False, limit=limit),
-        flow_note,
-    )
-    return lines
+    """Best performers with the full multi-period returns table."""
+    top = metrics.top_by(records, sort_key, reverse=True, limit=limit, guard=guard)
+    if not top:
+        return [_block(heading, "")]
 
-
-MAIN_TITLES = {
-    "best": "🚀 EN İYİ GETİRİ",
-    "worst": "📉 EN KÖTÜ GETİRİ",
-    "inflow": "💰 EN ÇOK PARA GİRİŞİ",
-    "outflow": "💸 EN ÇOK PARA ÇIKIŞI",
-}
-
-SUB_TITLES = {
-    "best": "En iyi getiri",
-    # "En düşük" rather than "En kötü": money-market funds effectively never post
-    # a negative day, so this table shows the bottom of a positive range.
-    "worst": "En düşük getiri",
-    "inflow": "En çok para girişi",
-    "outflow": "En çok para çıkışı",
-}
+    body = _returns_table(top, numbered=True) + "\n" + RETURNS_LEGEND
+    body += "\n" + "\n".join(
+        "<i>{}. {} — {}</i>".format(i, esc(r.get("code") or ""), esc(fund_name(r)))
+        for i, r in enumerate(top, start=1)
+    )
+    return [_block(heading, body)]
 
 
 def _platform_section(
     heading: str,
     records: List[dict],
-    value_key: str,
     guard: Optional[str],
     flow_note: str,
     include_money_market: bool,
+    daily_only_headline: bool,
+    sort_key: str = "daily_return",
 ) -> List[str]:
-    """One platform's full set of tables, split into general / money market / metals."""
     segments = metrics.split_segments(records)
-
-    lines = [
-        "",
-        "━━━━━━━━━━━━━━━━━━━━",
-        "<b>{}</b>".format(heading),
-    ]
+    blocks = ["━━━━━━━━━━━━━━━━━━━━\n<b>{}</b>".format(heading)]
 
     if not any(segments.values()):
-        lines.append("<i>Eşikleri geçen fon yok.</i>")
-        return lines
+        blocks.append("<i>Eşikleri geçen fon yok.</i>")
+        return blocks
 
-    lines += _segment_tables(
-        segments["general"],
-        value_key,
-        lambda v: percent(v),
-        guard,
-        flow_note,
-        config.TOP_N,
-        MAIN_TITLES,
+    general = segments["general"]
+
+    if daily_only_headline:
+        top = metrics.top_by(
+            general, sort_key, reverse=True, limit=config.TOP_N, guard=guard
+        )
+        blocks.append(
+            _block(
+                "🚀 EN İYİ GETİRİ",
+                _named_ranking(top, lambda r: percent(r.get(sort_key))),
+            )
+        )
+    else:
+        blocks += _returns_ranking_block(
+            "🚀 EN İYİ GETİRİ", general, config.TOP_N, guard, sort_key
+        )
+
+    blocks.append(
+        _block(
+            "💰 EN ÇOK PARA GİRİŞİ",
+            _named_ranking(
+                metrics.top_by(general, "flow", reverse=True, limit=config.TOP_N),
+                lambda r: money(r.get("flow"), signed=True),
+            ),
+            flow_note,
+        )
+    )
+    blocks.append(
+        _block(
+            "👥 YATIRIMCI SAYISI EN ÇOK ARTAN",
+            _named_ranking(
+                metrics.top_by(
+                    general, "investor_change", reverse=True, limit=config.TOP_N
+                ),
+                lambda r: "+{} kişi".format(count(r.get("investor_change"))),
+            ),
+            flow_note,
+        )
     )
 
-    if include_money_market and segments["money_market"]:
-        lines += ["", "<b>🏦 Para Piyasası Fonları</b>"]
-        lines += _segment_tables(
-            segments["money_market"],
-            value_key,
-            lambda v: percent(v, 3),
-            guard,
-            flow_note,
-            config.SUB_TOP_N,
-            SUB_TITLES,
+    if include_money_market:
+        blocks.append(
+            _block(
+                "💸 EN ÇOK PARA ÇIKIŞI",
+                _named_ranking(
+                    metrics.top_by(general, "flow", reverse=False, limit=config.TOP_N),
+                    lambda r: money(r.get("flow"), signed=True),
+                ),
+                flow_note,
+            )
         )
+        if segments["money_market"]:
+            blocks += _returns_ranking_block(
+                "🏦 PARA PİYASASI — EN İYİ GETİRİ",
+                segments["money_market"],
+                config.SUB_TOP_N,
+                guard,
+                sort_key,
+            )
 
     if segments["metals"]:
-        lines += ["", "<b>🥇 Kıymetli Madenler (altın · gümüş)</b>"]
-        lines += _segment_tables(
+        blocks += _returns_ranking_block(
+            "🥇 KIYMETLİ MADENLER — EN İYİ GETİRİ",
             segments["metals"],
-            value_key,
-            lambda v: percent(v),
-            guard,
-            flow_note,
             config.SUB_TOP_N,
-            SUB_TITLES,
+            guard,
+            sort_key,
         )
 
-    return lines
+    return blocks
+
+
+def _kap_block(items: List[dict], note: Optional[str] = None) -> List[str]:
+    if not items:
+        return [
+            _block(
+                "📄 KAP BİLDİRİMLERİ",
+                "",
+                note or "Takip listende yeni bildirim yok.",
+            )
+        ]
+
+    lines = []
+    for item in items:
+        stamp = item.get("published") or ""
+        text = "• <b>{}</b> — {}".format(
+            esc(item.get("code") or ""), esc(item.get("title") or "Bildirim")
+        )
+        if stamp:
+            text += " <i>({})</i>".format(esc(stamp))
+        if item.get("url"):
+            text += ' <a href="{}">→</a>'.format(esc(item["url"]))
+        lines.append(text)
+    return [_block("📄 KAP BİLDİRİMLERİ", "\n".join(lines))]
+
+
+def _footnote(total: int) -> str:
+    return "<i>* {} fon tarandı · {} ve {} yatırımcı alt sınırı</i>".format(
+        count(total), money(config.MIN_AUM_TRY), count(config.MIN_INVESTORS)
+    )
+
+
+# -- reports -----------------------------------------------------------------
 
 
 def daily_report(
@@ -342,39 +402,30 @@ def daily_report(
     baseline_day: Optional[date],
     kap_items: Optional[List[dict]] = None,
     kap_note: Optional[str] = None,
-) -> str:
+) -> List[str]:
     by_code = metrics.index_by_code(records)
     eligible = metrics.eligible_universe(records)
     tefas, befas = metrics.split_by_platform(eligible)
 
-    lines = [
-        "📊 <b>TEFAS + BEFAS Günlük</b>",
-        "<i>{} · {} kapanış verileri</i>".format(
-            tr_date(run_day, with_weekday=True), tr_date(data_day)
-        ),
-        "<i>{} fon tarandı · sıralamalarda {} ve {} yatırımcı alt sınırı</i>".format(
-            count(len(records)), money(config.MIN_AUM_TRY), count(config.MIN_INVESTORS)
-        ),
+    blocks = [
+        "📊 <b>TEFAS + BEFAS Günlük</b>\n{} <i>({} kapanış verileri)</i>".format(
+            tr_date(run_day, with_weekday=True), tr_date(data_day, with_weekday=True)
+        )
     ]
 
     if baseline_day is None:
-        lines += [
-            "",
+        blocks.append(
             "⚠️ <i>Bu ilk kayıt. Para akışı ve yatırımcı değişimi için en az "
             "iki günlük veri gerekiyor — akış sıralamaları yarınki mesajdan "
-            "itibaren gelecek.</i>",
-        ]
-    elif baseline_day != data_day:
-        lines.append(
-            "<i>Değişimler {} ile karşılaştırmalı.</i>".format(tr_date(baseline_day))
+            "itibaren gelecek.</i>"
         )
 
-    lines += _watchlist_block(by_code, config.WATCHLIST, "⭐ TAKİP LİSTEM")
-    lines += _watchlist_block(
-        by_code, config.MONEY_MARKET_WATCHLIST, "🏦 TAKİP — PARA PİYASASI"
+    blocks += _watchlist_block(by_code, config.WATCHLIST, "⭐ TAKİP LİSTEM", True)
+    blocks += _watchlist_block(
+        by_code, config.MONEY_MARKET_WATCHLIST, "🏦 TAKİP — PARA PİYASASI", False
     )
-    lines += _watchlist_block(
-        by_code, config.BEFAS_WATCHLIST, "⭐ TAKİP — BEFAS (Emeklilik)"
+    blocks += _watchlist_block(
+        by_code, config.BEFAS_WATCHLIST, "⭐ TAKİP — BEFAS (Emeklilik)", True
     )
 
     flow_note = (
@@ -383,26 +434,26 @@ def daily_report(
         else "Yeterli veri yok."
     )
 
-    lines += _platform_section(
+    blocks += _platform_section(
         "🇹🇷 TEFAS · YATIRIM FONLARI",
         tefas,
-        "daily_return",
         "daily",
         flow_note,
         include_money_market=True,
+        daily_only_headline=True,
     )
-    lines += _platform_section(
+    blocks += _platform_section(
         "🏛 BEFAS · EMEKLİLİK FONLARI",
         befas,
-        "daily_return",
         "daily",
         flow_note,
         include_money_market=False,
+        daily_only_headline=False,
     )
 
-    lines += _kap_block(kap_items or [], kap_note)
-
-    return "\n".join(lines)
+    blocks += _kap_block(kap_items or [], kap_note)
+    blocks.append(_footnote(len(records)))
+    return blocks
 
 
 def _period_report(
@@ -411,117 +462,84 @@ def _period_report(
     emoji: str,
     data_day: date,
     baseline_day: Optional[date],
-) -> str:
+) -> List[str]:
     eligible = metrics.eligible_universe(records)
     tefas, befas = metrics.split_by_platform(eligible)
 
-    lines = [
-        "{} <b>TEFAS + BEFAS {}</b>".format(emoji, label),
-        "<i>{} tarihine kadar</i>".format(tr_date(data_day)),
+    blocks = [
+        "{} <b>TEFAS + BEFAS {}</b>\n<i>{} tarihine kadar</i>".format(
+            emoji, label, tr_date(data_day, with_weekday=True)
+        )
     ]
 
     if baseline_day is None:
-        lines += [
-            "",
+        blocks.append(
             "⚠️ <i>{} raporu için henüz yeterli geçmiş veri yok. "
-            "Bot veri biriktirmeye devam ediyor.</i>".format(label),
-        ]
-        return "\n".join(lines)
-
-    lines.append(
-        "<i>{} ile karşılaştırmalı · {} fon</i>".format(
-            tr_date(baseline_day), count(len(eligible))
+            "Bot veri biriktirmeye devam ediyor.</i>".format(label)
         )
-    )
+        return blocks
 
-    lines += _platform_section(
+    blocks += _platform_section(
         "🇹🇷 TEFAS · YATIRIM FONLARI",
         tefas,
-        "period_return",
         "period",
         "Yeterli veri yok.",
         include_money_market=True,
+        daily_only_headline=False,
+        sort_key="period_return",
     )
-    lines += _platform_section(
+    blocks += _platform_section(
         "🏛 BEFAS · EMEKLİLİK FONLARI",
         befas,
-        "period_return",
         "period",
         "Yeterli veri yok.",
         include_money_market=False,
+        daily_only_headline=False,
+        sort_key="period_return",
     )
-
-    lines += _ranking_block(
-        "📈 AUM'U EN ÇOK BÜYÜYEN (tümü)",
-        metrics.top_by(eligible, "aum_change_pct", reverse=True),
-        "aum_change_pct",
-        lambda v: percent(v, 1),
-    )
-
-    return "\n".join(lines)
+    blocks.append(_footnote(len(records)))
+    return blocks
 
 
-def weekly_report(records, data_day, baseline_day) -> str:
+def weekly_report(records, data_day, baseline_day) -> List[str]:
     return _period_report(records, "Haftalık", "🗓", data_day, baseline_day)
 
 
-def monthly_report(records, data_day, baseline_day) -> str:
+def monthly_report(records, data_day, baseline_day) -> List[str]:
     return _period_report(records, "Aylık", "📅", data_day, baseline_day)
 
 
 # -- delivery helpers --------------------------------------------------------
 
 
-def _atomic_blocks(text: str) -> List[str]:
-    """Break the report into units that must not be split.
+def render(blocks: List[str]) -> str:
+    """Whole report as one string, for previews and tests."""
+    return "\n\n".join(blocks)
 
-    A ``<pre>`` table spans several physical lines; cutting it in half would
-    leave an unbalanced tag and Telegram would reject the message. Everything
-    else is a single line.
+
+def split_for_telegram(blocks, limit: int = TELEGRAM_LIMIT) -> List[str]:
+    """Pack blocks into messages without ever splitting a block.
+
+    A block is a heading plus its table, so this is what keeps a heading from
+    being stranded at the end of one message with its table at the top of the
+    next. A single block larger than the limit is emitted on its own and left
+    for Telegram to reject loudly rather than being silently mangled.
     """
-    blocks: List[str] = []
-    pending: List[str] = []
+    if isinstance(blocks, str):
+        blocks = [blocks]
 
-    for line in text.split("\n"):
-        if pending:
-            pending.append(line)
-            if "</pre>" in line:
-                blocks.append("\n".join(pending))
-                pending = []
-            continue
-
-        if "<pre>" in line and "</pre>" not in line:
-            pending = [line]
-            continue
-
-        blocks.append(line)
-
-    if pending:  # unterminated block; keep it rather than dropping content
-        blocks.append("\n".join(pending))
-
-    return blocks
-
-
-def split_for_telegram(text: str, limit: int = TELEGRAM_LIMIT) -> List[str]:
-    """Pack the report into messages that each fit Telegram's size limit."""
-    if len(text) <= limit:
-        return [text]
-
-    chunks: List[str] = []
+    messages: List[str] = []
     current: List[str] = []
     size = 0
 
-    for block in _atomic_blocks(text):
-        block_size = len(block) + 1
-
+    for block in blocks:
+        block_size = len(block) + 2  # the "\n\n" joiner
         if current and size + block_size > limit:
-            chunks.append("\n".join(current).strip())
+            messages.append("\n\n".join(current))
             current, size = [], 0
-
         current.append(block)
         size += block_size
 
     if current:
-        chunks.append("\n".join(current).strip())
-
-    return [chunk for chunk in chunks if chunk]
+        messages.append("\n\n".join(current))
+    return [m for m in messages if m.strip()]

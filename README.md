@@ -16,9 +16,10 @@ market share for each of:
 | Money market | `TP2`, `PRY`, `PNU` |
 | BEFAS (pension) | `GGJ`, `TVH`, `GCN`, `FFC`, `NHN`, `BZY` |
 
-**Rankings** — TEFAS and BEFAS are reported under separate headings, each with
-best/worst returns and largest inflows/outflows (top 10), then the same four
-tables again for its sub-segments (top 5):
+**Rankings** — TEFAS and BEFAS are reported under separate headings, each
+showing the best returns, the largest inflows and outflows, and the biggest
+gains in investor count. Every table lists five funds. Each platform then
+repeats a best-returns table for its sub-segments:
 
 * *Money market* — TEFAS only. Pension funds have no money-market category, so
   BEFAS gets no such section.
@@ -33,13 +34,11 @@ Two thresholds, both in `src/config.py`:
 
 * `MIN_AUM_TRY` — 100 million TRY. Tiny funds otherwise dominate every
   leaderboard with percentage moves that are noise.
-* `MIN_INVESTORS` — 1,000. Size alone does not separate a retail fund from a
+* `MIN_INVESTORS` — 5,000. Size alone does not separate a retail fund from a
   private vehicle: plenty of "Serbest" funds hold hundreds of millions on behalf
-  of a handful of investors. Before this filter the top-10 daily gainers
-  included funds with 17, 19 and 23 investors. The threshold sits just below the
-  10th percentile of the mainstream categories (equity 1,057, mixed 816) so it
-  barely touches them, while the median Serbest fund has 537 investors — that
-  category drops from 27.7% of the eligible universe to 13.5%.
+  of a handful of investors. Before this filter the top daily gainers included
+  funds with 17, 19 and 23 investors. At 1,000 the eligible universe was 761
+  funds; at 5,000 it is around 460, weighted towards widely held retail funds.
 
 Money-market and precious-metal funds are held out of the headline tables, since
 they have their own. Otherwise a rally in gold fills every slot of the general

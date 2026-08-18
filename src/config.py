@@ -39,12 +39,10 @@ MIN_AUM_TRY = 100_000_000.0
 # before this filter the top-10 daily gainers included funds with 17, 19 and 23
 # investors.
 #
-# 1,000 is placed deliberately: it sits just below the 10th percentile of the
-# mainstream categories (equity 1,057, mixed 816, fund-of-funds 829) so it
-# barely touches them, while the median Serbest fund has only 537 investors, so
-# roughly half of that category drops out. Net effect on the eligible universe:
-# Serbest falls from 27.7% to 13.5%.
-MIN_INVESTORS = 1_000
+# Set to 5,000 by preference. For reference, at 1,000 the eligible universe was
+# 761 funds with Serbest at 13.5%; at 5,000 it is roughly 460 with Serbest near
+# 7%, so the leaderboards lean further towards widely held retail funds.
+MIN_INVESTORS = 5_000
 
 # Sanity bounds for a single day's return, in percent. Anything outside this is
 # treated as a data artifact (share splits/merges, redenominations) and dropped
@@ -60,12 +58,9 @@ MAX_ABS_PERIOD_RETURN_PCT = 5_000.0
 # as a restructuring artifact and kept out of the rankings.
 MAX_ABS_FLOW_PCT = 200.0
 
-# How many funds appear in each headline ranking table.
-TOP_N = 10
-
-# Sub-sections (money market, precious metals) draw from a much smaller pool --
-# roughly 100 funds each rather than 1,100 -- so a shorter table is proportionate
-# and keeps the daily message readable on a phone.
+# Every ranking table shows five funds. Longer tables pushed the daily message
+# past what is comfortable to read on a phone.
+TOP_N = 5
 SUB_TOP_N = 5
 
 # --- TEFAS categories ------------------------------------------------------

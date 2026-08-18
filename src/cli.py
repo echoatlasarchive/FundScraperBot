@@ -120,7 +120,7 @@ def _baseline(current_day: date, days_back: Optional[int]) -> Tuple[Optional[dat
 # -- commands ----------------------------------------------------------------
 
 
-def run_daily(args) -> str:
+def run_daily(args) -> List[str]:
     # Pin the clock before fetching: collect() runs for several minutes, and a
     # run started late in the Istanbul evening would otherwise cross midnight
     # and file the data under the wrong trading day.
@@ -152,7 +152,7 @@ def run_daily(args) -> str:
     )
 
 
-def _run_period(days_back: int, builder) -> str:
+def _run_period(days_back: int, builder) -> List[str]:
     current_day = storage.latest_snapshot_date()
     if current_day is None:
         raise RuntimeError("No snapshots stored yet. Run 'daily' or 'fetch' first.")
@@ -170,15 +170,15 @@ def _run_period(days_back: int, builder) -> str:
     return builder(records, current_day, baseline_day)
 
 
-def run_weekly(args) -> str:
+def run_weekly(args) -> List[str]:
     return _run_period(7, formatter.weekly_report)
 
 
-def run_monthly(args) -> str:
+def run_monthly(args) -> List[str]:
     return _run_period(30, formatter.monthly_report)
 
 
-def run_fetch(args) -> Optional[str]:
+def run_fetch(args) -> Optional[List[str]]:
     data_day = storage.data_date_for(storage.now_istanbul())
     records = collect(watchlist_only=args.watchlist_only)
     effective_day, is_new = store(records, data_day)

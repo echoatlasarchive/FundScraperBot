@@ -15,9 +15,12 @@ log = logging.getLogger(__name__)
 API = "https://api.telegram.org/bot{token}/sendMessage"
 
 
-def send(text: str, disable_preview: bool = True) -> None:
-    """Send a report, splitting it across messages if it exceeds the size limit."""
-    chunks = formatter.split_for_telegram(text)
+def send(blocks, disable_preview: bool = True) -> None:
+    """Send a report, packing its blocks into as few messages as fit.
+
+    Accepts the block list a report builder returns, or a plain string.
+    """
+    chunks = formatter.split_for_telegram(blocks)
     token = config.telegram_token()
     chat_id = config.telegram_chat_id()
 
@@ -51,9 +54,9 @@ def send_alert(message: str) -> None:
         log.error("Could not deliver alert: %s", exc)
 
 
-def preview(text: str) -> None:
+def preview(blocks) -> None:
     """Print what would be sent, for local dry runs."""
-    chunks: List[str] = formatter.split_for_telegram(text)
+    chunks: List[str] = formatter.split_for_telegram(blocks)
     for index, chunk in enumerate(chunks, start=1):
         print("\n{} MESAJ {}/{} ({} karakter) {}".format(
             "=" * 20, index, len(chunks), len(chunk), "=" * 20
