@@ -25,6 +25,11 @@ repeats a best-returns table for its sub-segments:
   BEFAS gets no such section.
 * *Precious metals* — gold and silver funds pooled together, on both platforms.
 
+**KAP disclosures** — for watchlist funds only, covering yesterday and today.
+On a Monday the window reaches back to the previous Friday, so anything filed
+after Friday's report is not missed. Each entry carries the subject, a short
+summary and a link to any attached PDF.
+
 **Weekly / monthly** — the same shape over a longer window, plus the funds whose
 AUM grew the most.
 
@@ -74,7 +79,23 @@ registration and no API key.
 `fonTipi: "YAT"` covers the ~1,050 securities mutual funds; `fonTipi: "EMK"`
 covers the ~310 pension funds. BEFAS needs no separate scraper.
 
-A full run touches ~1,360 funds and takes 6–8 minutes.
+A full run touches ~1,360 funds and takes 6–8 minutes, plus roughly two minutes
+for the KAP pass over the thirteen watchlist funds.
+
+### KAP
+
+KAP serves its two relevant pages very differently, so `src/kap.py` uses two
+techniques. The disclosure list at `/tr/fon-bildirimleri/<slug>` is
+client-rendered by a Next.js server action whose id changes on every request,
+and stays empty until a category is picked — so it is driven with headless
+Chromium. Individual disclosures at `/tr/Bildirim/<id>` are server-rendered and
+fetched over plain HTTP. The row checkbox's `id` attribute is the disclosure id
+that bridges the two.
+
+Two things that will look like bugs but are not: the browser locale must be
+Turkish, or KAP bounces its own server actions to `/en/` and the table never
+fills; and each fund needs a fresh browser context, because driving thirteen
+navigations through one page wedges after the first.
 
 ### Things worth knowing about the upstream service
 
@@ -179,17 +200,12 @@ src/storage.py     snapshot read/write, staleness detection
 src/metrics.py     flows, deltas, rankings, filters
 src/formatter.py   Turkish Telegram rendering
 src/telegram.py    delivery and failure alerts
-src/kap.py         KAP disclosures (not yet wired — see the module docstring)
+src/kap.py         KAP disclosures for watchlist funds
 src/cli.py         entry point
 ```
 
 ## Known gaps
 
-* **KAP disclosures are not implemented.** KAP moved to a Next.js application;
-  its old public API either 404s or hangs, and the disclosure list now arrives
-  through a server action keyed by a build hash. `src/kap.py` documents the two
-  workable approaches. The daily report prints an explanatory line in the
-  meantime.
 * **No flow history before the first run.** See above.
 * Public holidays are not modelled. When TEFAS publishes nothing, the fetched
   data is byte-identical to the previous snapshot; that is detected, no new file

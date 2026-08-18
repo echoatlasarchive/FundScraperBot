@@ -12,7 +12,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from src import config, formatter, metrics, storage  # noqa: E402
+from src import config, formatter, kap, metrics, storage  # noqa: E402
 
 
 def make_record(code, **overrides):
@@ -396,3 +396,63 @@ class TestReportRendering(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestKapWindow(unittest.TestCase):
+    def test_monday_reaches_back_to_friday(self):
+        # Friday's evening and weekend disclosures land after Friday's report
+        # went out, so Monday has to cover them too.
+        monday = date(2026, 8, 17)
+        self.assertEqual(kap.window_start(monday), date(2026, 8, 14))
+
+    def test_other_days_cover_yesterday(self):
+        tuesday = date(2026, 8, 18)
+        self.assertEqual(kap.window_start(tuesday), date(2026, 8, 17))
+
+    def test_relative_dates(self):
+        today = date(2026, 8, 18)
+        self.assertEqual(kap.parse_row_date("Bugün 08:55", today), today)
+        self.assertEqual(kap.parse_row_date("Dün 17:53", today), date(2026, 8, 17))
+        self.assertEqual(
+            kap.parse_row_date("14.08.2026 16:44", today), date(2026, 8, 14)
+        )
+        self.assertIsNone(kap.parse_row_date("", today))
+
+    def test_slug_includes_the_parenthetical_form_first(self):
+        slugs = kap._candidate_slugs(
+            "PHE", "PUSULA PORTFÖY HİSSE SENEDİ FONU (HİSSE SENEDİ YOĞUN FON)"
+        )
+        self.assertEqual(
+            slugs[0], "phe-pusula-portfoy-hisse-senedi-fonu-hisse-senedi-yogun-fon"
+        )
+        self.assertIn("phe-pusula-portfoy-hisse-senedi-fonu", slugs)
+
+    def test_slug_folds_both_turkish_i_forms(self):
+        # TEFAS writes ZURICH with a Latin I, KAP writes ZURİCH with a dotted one.
+        self.assertEqual(kap._slugify("ZURICH"), kap._slugify("ZURİCH"))
+
+    def test_shell_page_is_not_mistaken_for_a_fund_page(self):
+        # An unknown slug still answers 200 with a small shell.
+        self.assertFalse(kap._page_is_for("x" * 69_000, "TLY"))
+        self.assertTrue(kap._page_is_for("TLY" + "x" * 80_000, "TLY"))
+
+
+class TestKapRendering(unittest.TestCase):
+    def test_disclosure_with_attachment_renders_summary_and_link(self):
+        items = [{
+            "code": "TLY", "date": date(2026, 8, 17), "time": "17:53",
+            "subject": "Borsa Dışı Repo - Ters Repo Sözleşmesi",
+            "summary": "Borsa Dışı Ters Repo Sözleşmesi",
+            "attachments": ["https://www.kap.org.tr/tr/api/file/download/abc123"],
+            "url": "https://www.kap.org.tr/tr/Bildirim/1651233",
+        }]
+        block = formatter._kap_block(items)[0]
+        self.assertIn("TLY", block)
+        self.assertIn("17 Ağustos 2026 17:53", block)
+        self.assertIn("Ters Repo", block)
+        self.assertIn("file/download/abc123", block)
+        self.assertIn("Bildirim/1651233", block)
+
+    def test_no_disclosures_says_so(self):
+        block = formatter._kap_block([])[0]
+        self.assertIn("yeni bildirim yok", block)

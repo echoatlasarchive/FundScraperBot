@@ -139,7 +139,16 @@ def run_daily(args) -> List[str]:
 
     log.info("Coverage: %s", metrics.coverage(records))
 
-    kap_items = kap.fetch_disclosures(config.ALL_WATCHED, effective_day)
+    # KAP is keyed by fund name, not code, so pass both. The window is anchored
+    # on the calendar day the report is sent, not the trading session it covers:
+    # disclosures published this morning are news even though the prices are not.
+    by_code = metrics.index_by_code(records)
+    watched = [
+        (code, by_code[code].get("name") or "")
+        for code in config.ALL_WATCHED
+        if code in by_code
+    ]
+    kap_items = kap.fetch_disclosures(watched, today=run_dt.date())
     kap_note = None if kap.ENABLED else kap.DISABLED_NOTE
 
     return formatter.daily_report(

@@ -34,13 +34,13 @@ unlimited and free. Nothing secret lives in the code.
 | Repo | https://github.com/echoatlasarchive/FundScraperBot |
 | Workflows | `daily.yml` (weekdays 09:00 UTC), `periodic.yml` (Mon + 1st) |
 | Secrets set | `TELEGRAM_TOKEN`, `TELEGRAM_CHAT_ID` |
-| Tests | 32, `python -m unittest discover -s tests` |
+| Tests | 40, `python -m unittest discover -s tests` |
 | History | Building from scratch; see §4 |
 
 **Watchlists** (`src/config.py`): TEFAS `PHE TLY KHA THF` · money market
 `TP2 PRY PNU` · BEFAS `GGJ TVH GCN FFC NHN BZY`.
 
-**Ranking filters**: AUM ≥ 100M TRY **and** ≥ 1,000 investors. The investor
+**Ranking filters**: AUM ≥ 100M TRY **and** ≥ 5,000 investors. The investor
 threshold is the important one — see §5.
 
 ---
@@ -165,11 +165,11 @@ filter the top-10 daily gainers included funds with **17, 19 and 23**
 investors. Real example: `PPF` (Azimut Akçe Serbest) holds 550M TRY for **22**
 investors.
 
-1,000 is placed deliberately — just below the 10th percentile of the mainstream
-categories (equity 1,057, mixed 816, fund-of-funds 829) so it barely touches
-them, while the median Serbest fund has 537 investors. Serbest drops from 27.7%
-of the eligible universe to 13.5%. **Do not raise it casually**; re-derive from
-the data if you change it.
+The threshold started at 1,000 — just below the 10th percentile of the
+mainstream categories (equity 1,057, mixed 816, fund-of-funds 829) so it barely
+touched them, while the median Serbest fund has 537 investors. It was later
+raised to 5,000 by preference, taking the eligible universe from 761 funds to
+about 460. **Do not change it casually**; re-derive from the data if you do.
 
 ### Segment classification needs the fund name, not just the category
 
@@ -198,30 +198,39 @@ performance.
 
 ---
 
-## 6. Open items
+## 6. KAP
 
-### KAP integration — not implemented
+Implemented in `src/kap.py`, for watchlist funds only. Worth knowing before
+touching it, because most of this was found the hard way:
 
-`src/kap.py` is a stub; the daily report prints an explanatory line. KAP moved
-to a Next.js application and its old public API is gone:
+* KAP's old public API is gone. `POST /tr/api/memberDisclosureQuery` still
+  routes but **never responds** (hangs past 120s); `/tr/api/disclosure/*`,
+  `/tr/api/todayDisclosure` and every RSS path 404.
+* The disclosure list is rendered by a Next.js **server action** whose id
+  changes on *every request* — replaying the POST answers `Server action not
+  found`, and no 40-hex action ids appear in the JS chunks. Hence the browser.
+* **The table starts empty.** The category dropdown opens on a disabled "Seçim
+  Yapınız" placeholder; nothing renders until "Tüm Bildirimler" is selected and
+  the filter button pressed.
+* **The browser locale must be Turkish.** With an English locale KAP 307s its
+  own server action to `/en/<hash>`, which 404s, and the table never fills. This
+  is why the first attempts looked like a dead end.
+* **One context per fund.** Reusing a single page across all thirteen funds
+  wedges after the first: every later navigation times out.
+* Do not wait for `networkidle` — analytics and bot-detection beacons keep the
+  network busy forever. Wait for the controls instead.
+* Individual disclosures at `/tr/Bildirim/<id>` *are* server-rendered and can be
+  fetched with plain `requests`. The bridge from list to detail is the row
+  checkbox's `id` attribute, which is the disclosure id.
+* Slugs are `code-slugified-full-name`, parenthetical included. Validate a
+  candidate by the **fund code**, never the name: TEFAS writes "ZURICH" with a
+  Latin I where KAP writes "ZURİCH" with a dotted one. An unknown slug still
+  answers 200, with a ~69 KB shell instead of the ~89 KB real page.
+* Attachment links are `/tr/api/file/download/<id>`. KAP prefixes the response
+  with 27 bytes of Java serialization header before `%PDF` — its own quirk, the
+  same as on KAP's site, and harmless since the bot only links to the file.
 
-* `POST /tr/api/memberDisclosureQuery` — the endpoint every existing KAP
-  scraper uses. Still routes (does not 404) but **never responds**; hangs past
-  120s.
-* `/tr/api/disclosure/*`, `/tr/api/todayDisclosure`, RSS feeds — all 404.
-  `/tr/api/member/filter/CompanyTypeFund` answers 200 with `[]`.
-* Scraping `/tr/bildirim-sorgu` — the HTML carries only filter metadata
-  (sectors, markets), not the disclosure list. That arrives via a Next.js
-  **server action**, whose identifier is a build hash changing on every deploy.
-
-Two viable routes, both cheap enough for Actions:
-
-1. Call the server action, resolving its hash at run time from the page's JS
-   chunks. No new dependencies, breaks whenever KAP redeploys.
-2. Drive headless Playwright in the workflow. ~40s and ~200MB extra per run,
-   robust against redesigns.
-
-Scope when built: disclosures for watchlist funds only.
+## 7. Open items
 
 ### Backfilling flow history
 
@@ -245,7 +254,7 @@ bulletins, an archive site, a third-party dataset), it could be injected into
 
 ---
 
-## 7. Operating it
+## 8. Operating it
 
 ```bash
 # See today's report without sending it (no credentials needed)

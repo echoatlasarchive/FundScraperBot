@@ -34,6 +34,19 @@ jobs:
 
       - run: pip install -r requirements.txt
 
+      # KAP's disclosure list is only reachable through a real browser; see the
+      # module docstring in src/kap.py. Cached so the ~100 MB download does not
+      # repeat on every run.
+      - name: Cache the Playwright browser
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ runner.os }}-${{ hashFiles('requirements.txt') }}
+
+      - name: Install the Playwright browser
+        run: python -m playwright install --with-deps chromium
+
       - name: Fetch, store and send
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}

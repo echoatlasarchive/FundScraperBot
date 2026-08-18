@@ -11,14 +11,12 @@ top of the next.
 Two table shapes are used:
 
 * Numeric comparisons go in ``<pre>`` blocks so columns line up in the phone's
-  monospace font. Lines stay under ~40 characters to avoid horizontal scrolling,
-  and the best value in each column is marked with ``*``.
+  monospace font. Lines stay under ~40 characters to avoid horizontal scrolling.
 
-  Bold would read better, but Telegram silently discards nested formatting
-  inside ``<pre>``: sending ``<pre>...<b>+0,30</b>...</pre>`` comes back from
-  the API with a single ``pre`` entity and no ``bold`` entity at all. Alignment
-  needs ``<pre>`` and bold needs to be outside it, so the two cannot be had
-  together; an ASCII marker is the compromise that does not disturb the columns.
+  Nothing inside these tables is emphasised. Telegram silently discards nested
+  formatting inside ``<pre>`` -- sending ``<pre>...<b>+0,30</b>...</pre>`` comes
+  back from the API with a single ``pre`` entity and no ``bold`` entity at all --
+  and an ASCII marker standing in for bold was more clutter than signal.
 * Rankings that carry a fund's full name use two lines per entry instead, since
   those names run to seventy characters and would wreck any fixed-width layout.
 """
@@ -40,9 +38,6 @@ MONTHS_TR = [
 DAYS_TR = [
     "Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi", "Pazar",
 ]
-
-HIGHLIGHT = "*"
-
 
 # -- primitives --------------------------------------------------------------
 
@@ -171,52 +166,31 @@ def _num(value):
 
 # -- returns table (code + daily / 1m / YTD, best marked) ---------------------
 
-# (field, heading, cell width, formatter, mark-the-best)
-# Only returns are marked -- those are the columns worth comparing across funds.
+# (field, heading, cell width, formatter)
 # Widths are tuned so the widest row stays inside ~40 characters even with the
 # flow columns attached, which is what fits a phone without sideways scrolling.
+# Each is one wider than its values need, to space the columns apart.
 RETURN_COLUMNS = (
-    ("daily_return", "Günlük", 6, lambda v: pct_bare(v, 2), True),
-    ("ret_1m", "1 Ay", 6, lambda v: pct_bare(v, 2), True),
-    # Wider than its values need: "Yılbaşı" is itself seven characters, so a
-    # narrower slot would run the heading into the one before it.
-    ("ret_ytd", "Yılbaşı", 7, lambda v: pct_bare(v, 1), True),
+    ("daily_return", "Günlük", 7, lambda v: pct_bare(v, 2)),
+    ("ret_1m", "1 Ay", 7, lambda v: pct_bare(v, 2)),
+    ("ret_ytd", "Yılbaşı", 8, lambda v: pct_bare(v, 1)),
 )
 
 FLOW_COLUMNS = (
-    ("flow", "Akış", 7, money_compact, False),
-    ("investor_change", "Kişi", 6, signed_int, False),
+    ("flow", "Akış", 8, money_compact),
+    ("investor_change", "Kişi", 7, signed_int),
 )
 
 
 def _returns_table(
     records: List[dict], numbered: bool = False, columns=RETURN_COLUMNS
 ) -> str:
-    """Monospace table of daily / 1-month / year-to-date returns.
-
-    The best value in each column is prefixed with ``*``. The marker occupies a
-    fixed slot in every cell so that marking a value never shifts the column.
-    """
+    """Monospace table of daily / 1-month / year-to-date returns."""
     label_width = 6 if numbered else 4
 
-    # Index of the row holding each column's best value. Only the first is
-    # marked, so a column where several funds tie does not fill up with stars.
-    best_row = {}
-    for key, _, _, _, markable in columns:
-        if not markable:
-            continue
-        ranked = [
-            (_num(r.get(key)), i)
-            for i, r in enumerate(records)
-            if _num(r.get(key)) is not None
-        ]
-        best_row[key] = max(ranked)[1] if ranked else None
-
-    # Every column reserves one extra character so a marked cell lines up with
-    # the unmarked ones above and below it.
     header = "{:<{}}".format("Kod", label_width)
-    for _, title, width, _, _ in columns:
-        header += "{:>{}}".format(title, width + 1)
+    for _, title, width, _ in columns:
+        header += "{:>{}}".format(title, width)
     rows = [header]
 
     for index, record in enumerate(records):
@@ -226,13 +200,8 @@ def _returns_table(
             else (record.get("code") or "")
         )
         row = "{:<{}}".format(label[:label_width], label_width)
-        for key, _, width, fmt, markable in columns:
-            # The marker is glued to the number, then the pair is right-aligned,
-            # so it reads as belonging to that value rather than to the code.
-            cell = fmt(_num(record.get(key)))
-            if markable and index == best_row.get(key):
-                cell = HIGHLIGHT + cell
-            row += "{:>{}}".format(cell, width + 1)
+        for key, _, width, fmt in columns:
+            row += "{:>{}}".format(fmt(_num(record.get(key))), width)
         rows.append(row)
 
     return "<pre>" + esc("\n".join(rows)) + "</pre>"
@@ -398,22 +367,37 @@ def _kap_block(items: List[dict], note: Optional[str] = None) -> List[str]:
             _block(
                 "📄 KAP BİLDİRİMLERİ",
                 "",
-                note or "Takip listende yeni bildirim yok.",
+                note or "Takip listende dün ve bugün yeni bildirim yok.",
             )
         ]
 
     lines = []
     for item in items:
-        stamp = item.get("published") or ""
-        text = "• <b>{}</b> — {}".format(
-            esc(item.get("code") or ""), esc(item.get("title") or "Bildirim")
-        )
-        if stamp:
-            text += " <i>({})</i>".format(esc(stamp))
+        when = tr_date(item["date"]) if item.get("date") else ""
+        if item.get("time"):
+            when = "{} {}".format(when, item["time"]).strip()
+
+        head = "<b>{}</b> · {}".format(esc(item.get("code") or ""), esc(when))
         if item.get("url"):
-            text += ' <a href="{}">→</a>'.format(esc(item["url"]))
-        lines.append(text)
-    return [_block("📄 KAP BİLDİRİMLERİ", "\n".join(lines))]
+            head = '<b>{}</b> · <a href="{}">{}</a>'.format(
+                esc(item.get("code") or ""), esc(item["url"]), esc(when)
+            )
+        lines.append(head)
+        lines.append(esc(item.get("subject") or "Bildirim"))
+
+        summary = (item.get("summary") or "").strip()
+        if summary and summary != "-":
+            if len(summary) > 200:
+                summary = summary[:199].rstrip() + "…"
+            lines.append("<i>{}</i>".format(esc(summary)))
+
+        for number, url in enumerate(item.get("attachments") or [], start=1):
+            label = "📎 Ek {}".format(number) if number > 1 else "📎 Ek (PDF)"
+            lines.append('<a href="{}">{}</a>'.format(esc(url), label))
+
+        lines.append("")
+
+    return [_block("📄 KAP BİLDİRİMLERİ", "\n".join(lines).strip())]
 
 
 def _footnote(total: int) -> str:
