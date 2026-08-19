@@ -15,7 +15,16 @@ import sys
 from datetime import date, datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 
-from . import config, formatter, kap, metrics, storage, telegram
+from . import (
+    config,
+    formatter,
+    infographic,
+    kap,
+    metrics,
+    storage,
+    telegram,
+    tweets,
+)
 from .tefas import TefasClient, TefasError
 
 log = logging.getLogger("fundbot")
@@ -120,16 +129,77 @@ def _baseline(current_day: date, days_back: Optional[int]) -> Tuple[Optional[dat
 # -- commands ----------------------------------------------------------------
 
 
-def run_daily(args) -> List[str]:
+PROBE_CODES = ["PHE", "TP2", "KHA", "TLY", "GCN"]
+
+
+def session_is_published() -> bool:
+    """Has TEFAS put out a session we have not already stored?
+
+    Scheduled runs fire early and often so that the report lands before the
+    fund-order cutoff, which means most of them find nothing new. Comparing a
+    five-fund probe against the newest snapshot settles that in seconds, instead
+    of ten minutes of scanning followed by a duplicate report.
+    """
+    latest = storage.latest_snapshot_date()
+    if latest is None:
+        return True  # nothing stored yet, so anything is new
+
+    stored = storage.load_snapshot(latest)
+    prices = TefasClient().probe(PROBE_CODES)
+    if not prices:
+        log.warning("Probe returned nothing; continuing with the full run.")
+        return True
+
+    changed = [
+        code
+        for code, price in prices.items()
+        if code in stored and abs(price - float(stored[code]["price"])) > 1e-9
+    ]
+    log.info(
+        "Probe against %s: %d/%d prices moved.", latest, len(changed), len(prices)
+    )
+    return bool(changed)
+
+
+def resolve_data_day(records: List[dict], run_dt) -> date:
+    """Which session the fetched data belongs to.
+
+    Preferred answer comes from the snapshot chain: if the price identity
+    confirms this data is the session right after the newest stored one, then
+    that is what it is, whatever the clock says. The clock rule is only a
+    fallback for the first run, or after a gap the chain cannot bridge.
+    """
+    latest = storage.latest_snapshot_date()
+    if latest is not None:
+        previous = storage.load_snapshot(latest)
+        if previous and storage.follows_consecutively(records, previous):
+            day = storage.next_business_day(latest)
+            log.info("Session chain: %s -> %s.", latest, day)
+            return day
+
+    day = storage.data_date_for(run_dt)
+    log.info("Falling back to the clock: trading day %s.", day)
+    return day
+
+
+def run_daily(args) -> Optional[List[str]]:
     # Pin the clock before fetching: collect() runs for several minutes, and a
     # run started late in the Istanbul evening would otherwise cross midnight
     # and file the data under the wrong trading day.
     run_dt = storage.now_istanbul()
-    data_day = storage.data_date_for(run_dt)
-    log.info("Run at %s (Istanbul) -> trading day %s", run_dt.isoformat(timespec="seconds"), data_day)
+    log.info("Run at %s (Istanbul).", run_dt.isoformat(timespec="seconds"))
+
+    if args.only_if_new and not session_is_published():
+        log.info("No new session yet; a later run will pick it up.")
+        return None
 
     records = collect()
+    data_day = resolve_data_day(records, run_dt)
     effective_day, is_new = store(records, data_day)
+
+    if args.only_if_new and not is_new:
+        log.info("Session %s was already reported; nothing to send.", effective_day)
+        return None
 
     if not is_new:
         records = list(storage.load_snapshot(effective_day).values())
@@ -160,19 +230,48 @@ def run_daily(args) -> List[str]:
         kap_note=kap_note,
     )
 
+    cards = _build_cards(records, effective_day)
     channel = config.telegram_channel_id()
-    if channel and not args.dry_run:
-        # Posted separately from the owner's copy, and without the watchlists.
-        # A channel failure must not cost the owner their report, so it is
-        # attempted first and its errors are swallowed.
+
+    if not args.dry_run:
+        if channel:
+            # Posted separately from the owner's copy, and without the
+            # watchlists. A channel failure must not cost the owner their
+            # report, so it is attempted first and its errors are swallowed.
+            try:
+                telegram.send(
+                    formatter.daily_report(public=True, **common), chat_id=channel
+                )
+                _send_cards(cards, effective_day, channel)
+            except Exception as exc:  # noqa: BLE001 - the private report matters more
+                log.warning("Could not post to the public channel: %s", exc)
+
+        _send_cards(cards, effective_day, None)
+
+        # Drafts are for the owner to edit and post by hand; they never go to
+        # the channel.
         try:
-            telegram.send(
-                formatter.daily_report(public=True, **common), chat_id=channel
-            )
-        except Exception as exc:  # noqa: BLE001 - the private report matters more
-            log.warning("Could not post to the public channel: %s", exc)
+            drafts = tweets.build_drafts(records, effective_day, run_dt.date())
+            telegram.send(tweets.as_message(drafts))
+            log.info("Sent %d tweet draft(s).", len(drafts))
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Could not send tweet drafts: %s", exc)
 
     return formatter.daily_report(**common)
+
+
+def _build_cards(records: List[dict], day: date) -> List:
+    try:
+        return infographic.build_cards(records, day, config.CARD_DIR)
+    except Exception as exc:  # noqa: BLE001 - the text report is what matters
+        log.warning("Could not render infographics: %s", exc)
+        return []
+
+
+def _send_cards(cards: List, day: date, chat_id: Optional[str]) -> None:
+    for path in cards:
+        kind = "tefas" if "tefas" in path.name else "befas"
+        telegram.send_photo(path, infographic.caption(kind, day), chat_id=chat_id)
 
 
 def _run_period(days_back: int, builder) -> List[str]:
@@ -227,6 +326,11 @@ def main(argv=None) -> int:
         "--watchlist-only",
         action="store_true",
         help="fetch only the watched funds (fast, for testing)",
+    )
+    parser.add_argument(
+        "--only-if-new",
+        action="store_true",
+        help="exit quietly unless TEFAS has published a session we have not stored",
     )
     parser.add_argument(
         "--no-alert",

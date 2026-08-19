@@ -8,3 +8,6 @@ __pycache__/
 # Superseded by src/. Contains a hard-coded Telegram token, so it must never be
 # committed -- the repository is public.
 tefas_scraper.py
+
+# Rendered cards are regenerated every run; only the source data is worth keeping.
+data/cards/

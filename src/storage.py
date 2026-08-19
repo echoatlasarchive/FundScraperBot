@@ -143,6 +143,14 @@ def previous_business_day(day: date, steps: int = 1) -> date:
     return day
 
 
+def next_business_day(day: date, steps: int = 1) -> date:
+    for _ in range(steps):
+        day += timedelta(days=1)
+        while day.weekday() >= 5:
+            day += timedelta(days=1)
+    return day
+
+
 def data_date_for(run_dt: datetime) -> date:
     """Which trading session the data fetched *now* belongs to.
 

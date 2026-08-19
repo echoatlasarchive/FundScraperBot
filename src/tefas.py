@@ -192,6 +192,24 @@ class TefasClient:
     def fund_types(self) -> List[dict]:
         return self._post("fonTurGetir", {"dil": "TR"})
 
+    def probe(self, codes: Iterable[str]) -> Dict[str, float]:
+        """Prices for a handful of funds, to test whether a session is out yet.
+
+        A full sweep costs ten minutes; this costs a couple of seconds, so a run
+        that fires before TEFAS has published can bail out immediately instead of
+        scanning the whole universe for nothing.
+        """
+        prices: Dict[str, float] = {}
+        for code in codes:
+            try:
+                row = self.fund_snapshot(code)
+            except TefasError as exc:
+                log.warning("Probe failed for %s: %s", code, exc)
+                continue
+            if row and row.get("sonFiyat") is not None:
+                prices[code] = float(row["sonFiyat"])
+        return prices
+
     # -- composite -----------------------------------------------------------
 
     def snapshot_many(

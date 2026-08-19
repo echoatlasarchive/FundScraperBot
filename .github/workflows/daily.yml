@@ -2,9 +2,18 @@ name: Daily report
 
 on:
   schedule:
-    # TEFAS publishes day T's prices on the morning of T+1.
-    # 09:00 UTC == 12:00 Europe/Istanbul (UTC+3, no DST).
-    - cron: "0 9 * * 1-5"
+    # The report has to land before the 13:30 Istanbul fund-order cutoff, and
+    # two things stand in the way: GitHub queues scheduled runs (measured 62 and
+    # 63 minutes late on consecutive days, both for an on-the-hour cron), and a
+    # full run takes about 25 minutes.
+    #
+    # So: fire early, fire repeatedly, and off the hour -- the top of the hour is
+    # the most congested slot. Each attempt probes five funds first and exits in
+    # seconds unless TEFAS has published a session we have not stored, so the
+    # first attempt that finds fresh data sends and the rest cost nothing.
+    #
+    # 05:20 UTC == 08:20 Istanbul, through 09:20 UTC == 12:20 Istanbul.
+    - cron: "20 5,6,7,8,9 * * 1-5"
   workflow_dispatch:
     inputs:
       dry_run:
@@ -51,9 +60,14 @@ jobs:
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_CHANNEL_ID: ${{ secrets.TELEGRAM_CHANNEL_ID }}
           TEFAS_TOKEN: ${{ secrets.TEFAS_TOKEN }}
         run: |
-          python -m src.cli daily ${{ inputs.dry_run && '--dry-run' || '' }}
+          # Scheduled attempts stay quiet unless there is a new session; a
+          # manual dispatch always reports, so it stays useful for testing.
+          python -m src.cli daily \
+            ${{ inputs.dry_run && '--dry-run' || '' }} \
+            ${{ github.event_name == 'schedule' && '--only-if-new' || '' }}
 
       - name: Commit the snapshot
         run: |

@@ -13,6 +13,7 @@ from . import config, formatter
 log = logging.getLogger(__name__)
 
 API = "https://api.telegram.org/bot{token}/sendMessage"
+PHOTO_API = "https://api.telegram.org/bot{token}/sendPhoto"
 
 
 def send(blocks, disable_preview: bool = True, chat_id: Optional[str] = None) -> None:
@@ -46,6 +47,29 @@ def send(blocks, disable_preview: bool = True, chat_id: Optional[str] = None) ->
         )
         if index < len(chunks):
             time.sleep(0.5)
+
+
+def send_photo(
+    path, caption: str = "", chat_id: Optional[str] = None
+) -> None:
+    """Upload one image. Captions are capped at 1024 characters by Telegram."""
+    token = config.telegram_token()
+    chat_id = chat_id or config.telegram_chat_id()
+
+    with open(path, "rb") as handle:
+        resp = requests.post(
+            PHOTO_API.format(token=token),
+            data={"chat_id": chat_id, "caption": caption[:1024], "parse_mode": "HTML"},
+            files={"photo": handle},
+            timeout=120,
+        )
+    if resp.status_code != 200:
+        raise RuntimeError(
+            "Telegram rejected the photo: HTTP {} {}".format(
+                resp.status_code, resp.text[:300]
+            )
+        )
+    log.info("Sent %s to %s.", getattr(path, "name", path), chat_id)
 
 
 def send_alert(message: str) -> None:

@@ -16,6 +16,9 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = REPO_ROOT / "data"
 SNAPSHOT_DIR = DATA_DIR / "snapshots"
 STATE_DIR = DATA_DIR / "state"
+# Rendered infographic cards. Committed alongside the snapshots so the
+# channel history stays reproducible.
+CARD_DIR = DATA_DIR / "cards"
 
 # --- Watchlist -------------------------------------------------------------
 # Funds the daily message always reports on, whatever their ranking.

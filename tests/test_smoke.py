@@ -12,7 +12,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from src import config, formatter, kap, metrics, storage  # noqa: E402
+from src import config, formatter, infographic, kap, metrics, storage, tweets  # noqa: E402
 
 
 def make_record(code, **overrides):
@@ -549,3 +549,62 @@ class TestPublicReport(unittest.TestCase):
         )
         self.assertIn("TAKİP LİSTEM", text)
         self.assertNotIn("Yatırım tavsiyesi değildir", text)
+
+
+class TestTurkishTitleCase(unittest.TestCase):
+    def test_dotted_capital_survives(self):
+        # str.title() turns "HİSSE" into "Hi̇sse" -- an i followed by a
+        # combining dot -- because Python lowercases İ to i + U+0307.
+        self.assertEqual(
+            tweets._tr_title("TERA PORTFÖY HİSSE SENEDİ FONU"),
+            "Tera Portföy Hisse Senedi Fonu",
+        )
+        self.assertNotIn("\u0307", tweets._tr_title("HİSSE"))
+
+    def test_dotless_i_becomes_capital_i(self):
+        self.assertEqual(tweets._tr_title("ALTIN KATILIM"), "Altın Katılım")
+
+
+class TestTweetDrafts(unittest.TestCase):
+    def _records(self):
+        rows = [
+            make_record("AAA", daily_return=2.5, ret_ytd=88.0),
+            make_record("BBB", daily_return=0.4),
+            make_record("CCC", daily_return=-0.6),
+        ]
+        previous = {
+            "AAA": make_record("AAA", shares=900_000_000, investors=15_000),
+            "BBB": make_record("BBB", shares=1_100_000_000, investors=25_000),
+            "CCC": make_record("CCC", shares=1_000_000_000, investors=20_000),
+        }
+        for r in rows:
+            r["daily_return"] = 0.0  # keep the price identity consistent
+        return metrics.attach_deltas(rows, previous)
+
+    def test_drafts_fit_a_tweet(self):
+        drafts = tweets.build_drafts(self._records(), date(2026, 8, 18), date(2026, 8, 19))
+        self.assertTrue(drafts)
+        for draft in drafts:
+            self.assertLessEqual(len(draft), tweets.LIMIT)
+
+    def test_yesterday_is_named_relatively(self):
+        self.assertEqual(tweets._day_label(date(2026, 8, 18), date(2026, 8, 19)), "Dün")
+        self.assertIn("Ağustos", tweets._day_label(date(2026, 8, 14), date(2026, 8, 19)))
+
+    def test_no_drafts_still_produces_a_message(self):
+        blocks = tweets.as_message([])
+        self.assertTrue(blocks)
+        self.assertIn("TWEET TASLAKLARI", blocks[0])
+
+
+class TestInfographicNames(unittest.TestCase):
+    def test_boilerplate_is_stripped(self):
+        record = {"name": "ANADOLU HAYAT EMEKLİLİK A.Ş. ALTIN EMEKLİLİK YATIRIM FONU"}
+        self.assertNotIn("A.Ş.", infographic.short_name(record))
+        self.assertNotIn("EMEKLİLİK YATIRIM FONU", infographic.short_name(record))
+
+    def test_long_names_are_truncated_with_an_ellipsis(self):
+        record = {"name": "X" * 120}
+        out = infographic.short_name(record, limit=30)
+        self.assertEqual(len(out), 30)
+        self.assertTrue(out.endswith("…"))
