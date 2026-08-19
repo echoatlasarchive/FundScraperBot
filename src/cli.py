@@ -83,21 +83,24 @@ def store(records: List[dict], data_day: date) -> Tuple[date, bool]:
             )
             return previous_day, False
 
-        # Cross-check the inferred label against the price series. A mismatch
-        # means the clock-based guess is wrong -- typically a run made outside
-        # the publication window, which would silently corrupt the flow
-        # baseline by comparing a session against itself.
+        # Cross-check the inferred label against the price series.
         consecutive = storage.follows_consecutively(records, previous)
-        if consecutive is False:
+        if consecutive:
+            log.info("Verified: fetched data is the session after %s.", previous_day)
+        elif consecutive is False and data_day == previous_day:
+            # Same session fetched again, only with TEFAS's small intraday
+            # revisions. Normal for a manual re-run; the stored file is simply
+            # refreshed and the baseline stays the session before, so the flow
+            # figures are unaffected.
+            log.info("Re-fetched session %s; refreshing the snapshot.", previous_day)
+        elif consecutive is False:
             log.warning(
-                "Fetched data does not look like the session right after %s, "
-                "but it is being labelled %s. Flow figures may be unreliable; "
-                "check the publication window.",
+                "Fetched data is neither the session after %s nor %s itself, "
+                "yet it is being labelled %s. Flow figures may be unreliable.",
+                previous_day,
                 previous_day,
                 data_day,
             )
-        elif consecutive:
-            log.info("Verified: fetched data is the session after %s.", previous_day)
 
     storage.save_snapshot(data_day, records)
     return data_day, True
