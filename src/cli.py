@@ -295,7 +295,11 @@ def run_daily(args) -> Optional[List[str]]:
         try:
             drafts = tweets.build_drafts(records, effective_day, run_dt.date())
             telegram.send(tweets.as_message(drafts))
-            log.info("Sent %d tweet draft(s).", len(drafts))
+            log.info(
+                "Sent %d tweet draft(s), %d tweet(s) in total.",
+                len(drafts),
+                sum(len(d["tweets"]) for d in drafts),
+            )
         except Exception as exc:  # noqa: BLE001
             log.warning("Could not send tweet drafts: %s", exc)
 

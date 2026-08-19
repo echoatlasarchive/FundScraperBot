@@ -89,6 +89,40 @@ PRECIOUS_METAL_PATTERNS = (
     r"kiymetli maden",
 )
 
+# --- Commentary tweets -----------------------------------------------------
+
+# Funds the commentary tweets talk about by name, grouped so each line of the
+# "popular funds" post has a point to make. Codes are verified against the
+# snapshot at run time and silently dropped if a fund disappears.
+POPULAR_GROUPS = [
+    ("Popüler serbest fonlar", ["TLY", "DOH", "DFI"]),
+    ("Para ve yatırımcı çeken fonlar", ["THF", "KHA"]),
+    ("Yılbaşından beri güçlü, son ayda zorlanan", ["PHE", "PBR"]),
+]
+
+# Crypto exposure is not a TEFAS category, so it has to be matched by name.
+# "teknoloji" is useless here -- it pulls in 77 funds, nearly all semiconductor,
+# defence or health. These five terms return exactly the blockchain and fintech
+# funds and nothing else.
+CRYPTO_NAME_PATTERNS = (
+    "blockchain",
+    "blokchain",
+    "blokzinciri",
+    "blok zinciri",
+    "fintek",
+    "fintech",
+)
+
+# A move smaller than this is not worth a post. A metals fund up 0.11% on the
+# day says nothing to anyone, and publishing it trains readers to ignore the
+# account.
+MIN_TWEETWORTHY_RETURN_PCT = 1.0
+MIN_TWEETWORTHY_FLOW_TRY = 100_000_000.0
+MIN_TWEETWORTHY_INVESTORS = 500
+
+# Every post carries this, per the account's own notice.
+TWEET_SUFFIX = "ytd"
+
 # --- Public channel --------------------------------------------------------
 
 # The public report deliberately omits the watchlists. Those are the owner's own

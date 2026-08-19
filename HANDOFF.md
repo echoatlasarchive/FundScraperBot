@@ -2,7 +2,7 @@
 
 Context for picking this project up cold, in a fresh session or by another
 person. Written 2026-08-18, last updated 2026-08-19 (public channel, brand
-assets, infographic cards, tweet drafts, and the schedule fix).
+assets, infographic cards, commentary tweets, and the schedule fix).
 
 Read `README.md` first for what the bot does and how to run it. This file
 covers the things that are **not** obvious from the code: what was tried and
@@ -377,7 +377,44 @@ reads close enough to a recommendation to be worth avoiding. `daily_report`
 takes `public=True` for the channel copy, which drops those blocks and appends
 `config.PUBLIC_DISCLAIMER`. Tweet drafts likewise never leave the private chat.
 
-## 10. Open items
+## 10. Tweet drafts (`src/tweets.py`)
+
+Owner-only, never posted to the channel: drafts to read, edit and post by hand.
+Three rules, each of which came from a concrete failure:
+
+* **Only what is worth reading.** An early version announced a metals fund up
+  0.11% on the day. Everything now clears a threshold in
+  `config.MIN_TWEETWORTHY_*` (1% return, 100M TRY flow, 500 investors).
+  Money-market funds are reported by **flow, never by daily return** — their
+  return is ~0.1% by construction, so quoting it is exactly the empty number the
+  thresholds exist to stop.
+* **Descriptive, not advisory.** The account carries a "yatırım tavsiyesi
+  değildir" notice, so the copy has to match it. Context is fine ("bitcoin rose
+  7% and these funds hold blockchain companies"); a recommendation is not. Every
+  draft ends in `config.TWEET_SUFFIX` (`ytd`).
+* **Only what the data shows.** Fund *holdings and weights* are not obtainable —
+  the portfolio-breakdown endpoint is one of the retired ones (§3) — so no draft
+  claims to know what a fund holds. Weights have to be read off KAP's monthly
+  portfolio PDFs by hand.
+
+Drafts come back as `{"title", "tweets": [...]}`; more than one tweet means a
+thread. Threads exist because the account is not X Premium, so 280 characters is
+the hard limit.
+
+**Crypto funds are matched by name, and "teknoloji" must not be one of the
+patterns** — it returns 77 funds, nearly all semiconductor, defence or health.
+`config.CRYPTO_NAME_PATTERNS` returns exactly the eight blockchain/fintech funds
+(BCK, FJB, GBV, IJP, IVY, RBL, YZC, ZFB) and nothing else. There is no "BLO".
+
+`src/market.py` supplies the only outside data: bitcoin's 24-hour move from
+CoinGecko's free tier. Turkish inflation and the lira rate are deliberately
+absent — no free source was found trustworthy enough to publish from unattended,
+and a wrong benchmark in a posted tweet is worse than a missing one. Where a
+benchmark is needed, TEFAS's own funds stand in (a gold fund for gold, a
+money-market fund for deposits), which is honest because that is what a reader
+could actually have bought.
+
+## 11. Open items
 
 ### Backfilling flow history
 
@@ -412,7 +449,7 @@ published between midnight and noon appear in two consecutive reports.
 
 ---
 
-## 11. Operating it
+## 12. Operating it
 
 ```bash
 # See today's report without sending it (no credentials needed)

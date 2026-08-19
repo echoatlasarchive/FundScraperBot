@@ -38,8 +38,11 @@ summary and a link to any attached PDF.
 channel's palette and sent as images to both the owner and the channel.
 See `src/infographic.py`.
 
-**Tweet drafts** — a handful of sentences built from the day's numbers, sent to
-the owner only, to edit and post by hand. See `src/tweets.py`.
+**Tweet drafts** — commentary built from the day's numbers, sent to the owner
+only, to edit and post by hand. One draft per infographic card, plus popular-fund
+commentary, the blockchain/fintech funds hung on bitcoin's move, and rotating
+evergreen posts. Everything clears a significance threshold first, carries `#`
+tags and ends with `ytd`. See `src/tweets.py`.
 
 **Weekly / monthly** — the same shape over a longer window, plus the funds whose
 AUM grew the most.
@@ -221,6 +224,7 @@ src/telegram.py    delivery and failure alerts
 src/kap.py         KAP disclosures for watchlist funds
 src/infographic.py daily TEFAS/BEFAS cards as PNGs
 src/tweets.py      draft posts for X, owner only
+src/market.py      outside context (bitcoin), fails soft
 src/cli.py         entry point
 brand/             logos and covers, and the script that regenerates them
 ```

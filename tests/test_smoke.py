@@ -570,22 +570,37 @@ class TestTweetDrafts(unittest.TestCase):
         rows = [
             make_record("AAA", daily_return=2.5, ret_ytd=88.0),
             make_record("BBB", daily_return=0.4),
-            make_record("CCC", daily_return=-0.6),
+            make_record("CCC", daily_return=-1.6),
         ]
         previous = {
             "AAA": make_record("AAA", shares=900_000_000, investors=15_000),
             "BBB": make_record("BBB", shares=1_100_000_000, investors=25_000),
             "CCC": make_record("CCC", shares=1_000_000_000, investors=20_000),
         }
-        for r in rows:
-            r["daily_return"] = 0.0  # keep the price identity consistent
         return metrics.attach_deltas(rows, previous)
 
-    def test_drafts_fit_a_tweet(self):
+    def test_every_tweet_fits_and_carries_the_notice(self):
         drafts = tweets.build_drafts(self._records(), date(2026, 8, 18), date(2026, 8, 19))
         self.assertTrue(drafts)
         for draft in drafts:
-            self.assertLessEqual(len(draft), tweets.LIMIT)
+            for tweet in draft["tweets"]:
+                self.assertLessEqual(len(tweet), tweets.LIMIT)
+                self.assertTrue(tweet.rstrip().endswith(config.TWEET_SUFFIX))
+
+    def test_fund_codes_are_hashtagged(self):
+        self.assertEqual(tweets.tag("phe"), "#PHE")
+
+    def test_trivial_moves_are_not_tweetworthy(self):
+        # A metals fund up 0.11% on the day is exactly the empty number that
+        # made an earlier version worth ignoring.
+        self.assertFalse(tweets._significant_return(make_record("X", daily_return=0.11)))
+        self.assertTrue(tweets._significant_return(make_record("X", daily_return=2.4)))
+
+    def test_small_flows_and_investor_moves_are_not_tweetworthy(self):
+        self.assertFalse(tweets._significant_flow({"flow": 5_000_000}))
+        self.assertTrue(tweets._significant_flow({"flow": 500_000_000}))
+        self.assertFalse(tweets._significant_investors({"investor_change": 12}))
+        self.assertTrue(tweets._significant_investors({"investor_change": 900}))
 
     def test_yesterday_is_named_relatively(self):
         self.assertEqual(tweets._day_label(date(2026, 8, 18), date(2026, 8, 19)), "Dün")
@@ -595,6 +610,40 @@ class TestTweetDrafts(unittest.TestCase):
         blocks = tweets.as_message([])
         self.assertTrue(blocks)
         self.assertIn("TWEET TASLAKLARI", blocks[0])
+
+    def test_a_thread_is_labelled_as_a_flood(self):
+        blocks = tweets.as_message(
+            [{"title": "Test", "tweets": ["bir ytd", "iki ytd"]}]
+        )
+        self.assertIn("flood", blocks[1])
+        self.assertIn("1/2", blocks[1])
+
+
+class TestCryptoFundMatching(unittest.TestCase):
+    def test_blockchain_and_fintech_names_match(self):
+        for name in (
+            "GARANTİ PORTFÖY BLOCKCHAİN TEKNOLOJİLERİ DEĞİŞKEN FON",
+            "AK PORTFÖY FİNTEK VE BLOKZİNCİRİ TEKNOLOJİLERİ DEĞİŞKEN FON",
+            "FİBA PORTFÖY BLOK ZİNCİRİ TEKNOLOJİLERİ SERBEST FON",
+            "YAPI KREDİ PORTFÖY FİNTECH VE BLOCKCHAİN TEKNOLOJİLERİ DEĞİŞKEN FON",
+        ):
+            folded = metrics.fold(name)
+            self.assertTrue(
+                any(p in folded for p in config.CRYPTO_NAME_PATTERNS), name
+            )
+
+    def test_plain_technology_funds_do_not_match(self):
+        # "teknoloji" would pull in 77 funds -- semiconductors, defence, health --
+        # none of which have anything to do with crypto.
+        for name in (
+            "İŞ PORTFÖY YARI İLETKEN TEKNOLOJİLERİ DEĞİŞKEN FON",
+            "ZİRAAT PORTFÖY HAVACILIK VE SAVUNMA TEKNOLOJİLERİ DEĞİŞKEN FON",
+            "AK PORTFÖY YAPAY ZEKA TEKNOLOJİLERİ ŞİRKETLERİ DEĞİŞKEN FON",
+        ):
+            folded = metrics.fold(name)
+            self.assertFalse(
+                any(p in folded for p in config.CRYPTO_NAME_PATTERNS), name
+            )
 
 
 class TestInfographicNames(unittest.TestCase):
