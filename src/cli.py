@@ -51,6 +51,18 @@ def collect(watchlist_only: bool = False) -> List[dict]:
         log.info("%s universe: %d funds.", fund_type, len(rows))
         returns_rows.extend(rows)
 
+        # Only the codes named in EXTRA_FUND_CODES are taken from the untraded
+        # universe, and only because the commentary mentions them. Everything
+        # else there is deliberately out of scope -- see config.
+        extras = client.extra_funds(fund_type, config.EXTRA_FUND_CODES)
+        if extras:
+            log.info(
+                "%s extras: %s",
+                fund_type,
+                ", ".join(r.get("fonKodu") or "?" for r in extras),
+            )
+            returns_rows.extend(extras)
+
     if not returns_rows:
         raise TefasError("TEFAS returned an empty universe.")
 

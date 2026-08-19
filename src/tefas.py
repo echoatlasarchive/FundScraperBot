@@ -149,8 +149,18 @@ class TefasClient:
 
     # -- endpoints -----------------------------------------------------------
 
-    def returns_universe(self, fund_type: str) -> List[dict]:
+    def returns_universe(self, fund_type: str, traded_only: bool = True) -> List[dict]:
         """Whole universe in one call: period returns, category, risk score.
+
+        ``islem`` selects trading status: 1 returns only what TEFAS itself
+        trades (~1,056 YAT), 0 only what it does not (~1,076), and omitting the
+        field returns both.
+
+        **Rankings must only ever use the traded set.** A fund TEFAS does not
+        trade cannot be bought there, so putting one at the top of a leaderboard
+        aimed at TEFAS investors is worse than useless. The untraded set is
+        fetched only to pick out the handful of codes named in
+        ``config.EXTRA_FUND_CODES`` -- never to research or rank against.
 
         Returns rows shaped like::
 
@@ -158,17 +168,10 @@ class TefasClient:
              "getiri1a", "getiri3a", "getiri6a", "getiri1y", "getiriyb",
              "getiri3y", "getiri5y", "getiriOrani", "riskDegeri"}
         """
-        # No "islem" key on purpose. The field selects the trading status:
-        # 1 returns only the funds traded on TEFAS (1,056 YAT), 0 only those that
-        # are not (1,076), and omitting it returns both (2,132) with the
-        # `tefasDurum` flag telling them apart.
-        #
-        # Both are wanted. Plenty of funds outside TEFAS are large and widely
-        # held -- TMV alone has 36.5 billion TRY and 12,423 investors -- and
-        # leaving them out silently understated the market.
         payload = {
             "dil": "TR",
             "fonTipi": fund_type,
+            "islem": traded_only and 1 or 0,
             "donemGetiri1a": "1",
             "donemGetiri3a": "1",
             "donemGetiri6a": "1",
@@ -183,6 +186,18 @@ class TefasClient:
         for row in rows:
             row["fonTipi"] = fund_type
         return rows
+
+    def extra_funds(self, fund_type: str, codes: Iterable[str]) -> List[dict]:
+        """Named funds that TEFAS does not trade, e.g. TMV.
+
+        One extra call per fund type, filtered down to the configured codes.
+        Nothing else from the untraded universe is kept.
+        """
+        wanted = {c.upper() for c in codes}
+        if not wanted:
+            return []
+        rows = self.returns_universe(fund_type, traded_only=False)
+        return [r for r in rows if (r.get("fonKodu") or "").upper() in wanted]
 
     def fund_snapshot(self, code: str) -> Optional[dict]:
         """Per-fund snapshot: price, daily return, share count, AUM, investors.

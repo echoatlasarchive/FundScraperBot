@@ -91,11 +91,19 @@ PRECIOUS_METAL_PATTERNS = (
 
 # --- Commentary tweets -----------------------------------------------------
 
+# Funds TEFAS does not trade that are still wanted by name, because the
+# commentary talks about them.
+#
+# NOTHING ELSE from the untraded universe is ever fetched. Those funds cannot be
+# bought on TEFAS, so they must never appear in a ranking, a comparison or any
+# research -- only the codes listed here, and only where they are named.
+EXTRA_FUND_CODES = ["TMV"]
+
 # Funds the commentary tweets talk about by name, grouped so each line of the
 # "popular funds" post has a point to make. Codes are verified against the
 # snapshot at run time and silently dropped if a fund disappears.
 POPULAR_GROUPS = [
-    ("Popüler serbest fonlar", ["TLY", "DOH", "DFI"]),
+    ("Popüler serbest fonlar", ["TLY", "TMV", "DOH", "DFI"]),
     ("Para ve yatırımcı çeken fonlar", ["THF", "KHA"]),
     ("Yılbaşından beri güçlü, son ayda zorlanan", ["PHE", "PBR"]),
 ]
@@ -121,8 +129,11 @@ CRYPTO_NAME_PATTERNS = (
 # of the retired ones -- so there is nothing to poll. Re-run the extraction when
 # new monthly reports land and update the month below with it.
 #
-# IJP is absent on purpose: its report lists quantities and prices but no
-# per-holding weight, so any figure here would have been invented.
+# IJP's figure is a verified floor, not a total. Its report splits the numeric
+# columns and the security names into separate text blocks, so they have to be
+# paired by position; only pages where the two counts match exactly are trusted,
+# and every kept weight was cross-checked against value / fund total. Pages that
+# did not line up were discarded rather than guessed at.
 CRYPTO_HOLDINGS_MONTH = "Temmuz 2026"
 CRYPTO_HOLDINGS = {
     "RBL": (24.8, ["BLCN %12,9", "BLOK %11,9"]),
@@ -131,6 +142,7 @@ CRYPTO_HOLDINGS = {
     "ZFB": (12.3, ["HOOD %2,4", "XYZ %2,3", "RIOT %2,1", "HUT %2,1"]),
     "GBV": (7.0, ["CORZ %2,8", "CIFR %2,4", "MARA %0,9"]),
     "YZC": (4.5, ["XYZ %2,6", "MSTR %2,0"]),
+    "IJP": (5.9, ["CIFR %2,1", "HOOD %1,6", "MARA %1,1"]),
     "FJB": (2.3, ["APLD %2,3"]),
 }
 
