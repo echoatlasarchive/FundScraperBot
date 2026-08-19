@@ -370,22 +370,26 @@ def crypto_funds(records: List[dict], when: str) -> Optional[List[str]]:
     if tail:
         thread.append(tail)
 
-    # Holdings come from the funds' own monthly KAP reports; see
-    # config.CRYPTO_HOLDINGS for why they cannot be fetched live.
-    ranked = sorted(
-        config.CRYPTO_HOLDINGS.items(), key=lambda item: -item[1][0]
-    )
-    weight_lines = [
-        "{} %{} · {}".format(
-            tag(code),
-            formatter.tr_number(total, 1),
-            ", ".join(positions[:2]),
-        )
-        for code, (total, positions) in ranked[:5]
-    ]
+    # Every fund on the list, each with its own total. An earlier version showed
+    # the top five and hung two individual positions off each line, which read as
+    # though those positions were the fund's crypto exposure -- #RBL was printed
+    # as "%24,8 · BLCN %12,9, BLOK %11,9", the sum of the two named ETFs, while
+    # the fund actually holds four blockchain ETFs adding to %38,3. One number
+    # per fund, and the number is the whole of it.
+    #
+    # Weights come from the funds' own monthly KAP reports; see
+    # config.CRYPTO_HOLDINGS for how they are derived and what counts.
+    ranked = sorted(config.CRYPTO_HOLDINGS.items(), key=lambda item: -item[1][0])
     weights = _finish(
-        ["📁 Kripto ağırlığı en yüksek fonlar ({})".format(config.CRYPTO_HOLDINGS_MONTH), ""]
-        + weight_lines
+        [
+            "📁 Fonların içindeki kripto ağırlığı",
+            "({} KAP portföy raporları)".format(config.CRYPTO_HOLDINGS_MONTH),
+            "",
+        ]
+        + [
+            "{} %{}".format(tag(code), formatter.tr_number(total, 1))
+            for code, (total, _) in ranked
+        ]
     )
     if weights:
         thread.append(weights)
@@ -393,7 +397,8 @@ def crypto_funds(records: List[dict], when: str) -> Optional[List[str]]:
     closing = _finish(
         [
             "Bu fonlar kripto parayı doğrudan tutmaz;",
-            "madenci, borsa ve blokzinciri şirketlerinin hisselerini alır.",
+            "madenci, kripto borsası ve blokzinciri şirketlerinin",
+            "hisselerini ve blokzinciri ETF'lerini alır.",
             "",
             "Ağırlıklar aylık KAP portföy raporlarından.",
         ]

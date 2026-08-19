@@ -38,6 +38,12 @@ summary and a link to any attached PDF.
 channel's palette and sent as images to both the owner and the channel.
 See `src/infographic.py`.
 
+**Crypto exposure card** — a separate, portrait, undated card listing the eight
+blockchain/fintech funds and how much of each is invested in crypto-linked
+assets, read from the funds' monthly KAP portfolio reports. Rendered on demand
+with `python -m src.cli crypto-card`, not on the daily run, because the figures
+only change when new monthly reports land.
+
 **Tweet drafts** — commentary built from the day's numbers, sent to the owner
 only, to edit and post by hand. One draft per infographic card, plus popular-fund
 commentary, the blockchain/fintech funds hung on bitcoin's move, and rotating
@@ -49,8 +55,13 @@ AUM grew the most.
 
 ### Who makes it into a ranking
 
-Two thresholds, both in `src/config.py`:
+Three gates, all in `src/config.py`:
 
+* Only funds **TEFAS actually trades**. A fund sold solely through its own
+  distributor cannot be bought on TEFAS, so it has no business heading a table
+  aimed at TEFAS investors. Enforced twice: the returns query asks for
+  `islem=1`, and `metrics.eligible_universe()` re-checks the flag, because
+  stored snapshots are read back long after they were written.
 * `MIN_AUM_TRY` — 100 million TRY. Tiny funds otherwise dominate every
   leaderboard with percentage moves that are noise.
 * `MIN_INVESTORS` — 5,000. Size alone does not separate a retail fund from a
@@ -187,6 +198,14 @@ it, and the probe keeps the extra attempts free.
 `periodic.yml` runs weekly on Monday and monthly on the 1st, and reads the
 snapshots the daily job committed rather than fetching anything itself.
 
+Separately from the schedule, a report is only ever **delivered** between 07:00
+and 14:00 Istanbul. The schedule decides when the bot runs; the window decides
+whether it may send. Without it, anything that fires the workflow off-schedule —
+a manual dispatch made while testing, a re-run — posts to the public channel at
+whatever hour that happens to be, which is how a report once went out at 02:17
+in the morning. Outside the window a run still fetches, stores and prints, and
+sends nothing; `--force` (or the workflow's `force` input) overrides.
+
 ## Running locally
 
 ```bash
@@ -198,6 +217,7 @@ export TELEGRAM_CHAT_ID=...
 
 ./venv/bin/python -m src.cli daily --dry-run          # print, send nothing
 ./venv/bin/python -m src.cli fetch --watchlist-only   # fast smoke test
+./venv/bin/python -m src.cli crypto-card              # render the crypto card
 ./venv/bin/python -m src.cli daily                    # fetch, store and send
 ./venv/bin/python -m src.cli weekly
 ./venv/bin/python -m src.cli monthly

@@ -117,9 +117,20 @@ def plausible_period_return(value) -> bool:
 
 
 def eligible_universe(records: List[dict]) -> List[dict]:
-    """Funds large and widely held enough to appear in a ranking."""
+    """Funds that may appear in a ranking: TEFAS-traded, large, widely held.
+
+    The traded test is not redundant with fetching ``islem=1``. Snapshots are the
+    project's history and are read back long after they were written -- by the
+    weekly and monthly reports, and as the daily baseline -- so a snapshot taken
+    while the query was wider carries untraded funds into every later ranking.
+    One did: the file for 2026-08-18 holds 2,532 rows, 105 of them untraded funds
+    that clear both thresholds. Filtering here means the rule holds against the
+    stored data too, not only against the fetch.
+    """
     return [
-        r for r in records if passes_size_filter(r) and passes_investor_filter(r)
+        r
+        for r in records
+        if is_tefas_traded(r) and passes_size_filter(r) and passes_investor_filter(r)
     ]
 
 

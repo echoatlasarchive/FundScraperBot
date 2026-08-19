@@ -4,6 +4,7 @@
     python -m src.cli weekly           weekly report (baseline ~7 days back)
     python -m src.cli monthly          monthly report (baseline ~30 days back)
     python -m src.cli fetch            fetch and store only, send nothing
+    python -m src.cli crypto-card      render the crypto-exposure card, send nothing
     python -m src.cli daily --dry-run  print the report instead of sending it
 """
 
@@ -365,11 +366,38 @@ def run_fetch(args) -> Optional[List[str]]:
     return None
 
 
+def run_crypto_card(args) -> None:
+    """Render the one-off crypto-exposure card and print where it landed.
+
+    Sends nothing. The weights behind it change once a month, when the KAP
+    portfolio reports land, so this is a card to render, look at and post by
+    hand -- not something to put on the daily run.
+    """
+    day = storage.latest_snapshot_date()
+    records = list(storage.load_snapshot(day).values()) if day else []
+
+    path = infographic.build_crypto_card(records, config.CARD_DIR)
+    if path is None:
+        raise RuntimeError("Could not render the crypto card.")
+
+    print(path)
+    for code, name, weight in infographic.crypto_rows(records):
+        print("  {:<4} {:>6}  {}".format(
+            code, formatter.percent(weight, 1, signed=False), name
+        ))
+    return None
+
+
+# The commands that can put something in front of a reader. "fetch" and
+# "crypto-card" write files and print; nothing they do needs a delivery window.
+SENDING_COMMANDS = frozenset({"daily", "weekly", "monthly"})
+
 COMMANDS = {
     "daily": run_daily,
     "weekly": run_weekly,
     "monthly": run_monthly,
     "fetch": run_fetch,
+    "crypto-card": run_crypto_card,
 }
 
 
@@ -390,6 +418,11 @@ def main(argv=None) -> int:
         help="exit quietly unless TEFAS has published a session we have not stored",
     )
     parser.add_argument(
+        "--force",
+        action="store_true",
+        help="deliver even outside the Istanbul delivery window",
+    )
+    parser.add_argument(
         "--no-alert",
         action="store_true",
         help="do not send a Telegram alert when the run fails",
@@ -398,6 +431,26 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
 
     _setup_logging(args.verbose)
+
+    # One gate for every send in the process: the report itself, the channel
+    # copy, the cards and the tweet drafts all sit behind args.dry_run, so
+    # flipping it here is what keeps an off-hours run from delivering anything.
+    # The fetch still happens and the report is still printed, which is what
+    # makes a manual dispatch useful for testing without being dangerous.
+    now = storage.now_istanbul()
+    if (
+        args.command in SENDING_COMMANDS
+        and not args.dry_run
+        and not args.force
+        and not config.within_delivery_window(now)
+    ):
+        start, end = config.DELIVERY_WINDOW_ISTANBUL
+        log.warning(
+            "It is %s in Istanbul, outside the %02d:00-%02d:00 delivery window. "
+            "Printing the report instead of sending it; pass --force to override.",
+            now.strftime("%H:%M"), start, end,
+        )
+        args.dry_run = True
 
     try:
         message = COMMANDS[args.command](args)

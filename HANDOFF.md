@@ -1,8 +1,8 @@
 # Handoff — FundScraperBot
 
 Context for picking this project up cold, in a fresh session or by another
-person. Written 2026-08-18, last updated 2026-08-19 (public channel, brand
-assets, infographic cards, commentary tweets, and the schedule fix).
+person. Written 2026-08-18, last updated 2026-08-20 (delivery window, the
+traded-only filter moved into `metrics`, and the rebuilt crypto weights).
 
 Read `README.md` first for what the bot does and how to run it. This file
 covers the things that are **not** obvious from the code: what was tried and
@@ -40,7 +40,7 @@ secret lives in the code.
 | Repo | https://github.com/echoatlasarchive/FundScraperBot |
 | Workflows | `daily.yml` (weekdays, hourly 05:20–09:20 UTC), `periodic.yml` (Mon + 1st) |
 | Secrets set | `TELEGRAM_TOKEN`, `TELEGRAM_CHAT_ID`, `TELEGRAM_CHANNEL_ID` |
-| Tests | 68, `python -m unittest discover -s tests` |
+| Tests | 77, `python -m unittest discover -s tests` |
 | Public channel | [@NeredeParaVar](https://t.me/NeredeParaVar), id `-1004445596324` |
 | Brand assets | `brand/`, regenerate with `python brand/build_brand.py` |
 | History | Building from scratch; see §4 |
@@ -251,6 +251,35 @@ chain cannot bridge.
 going away, and a fixed hour would *assume* publication is finished where the
 completeness gate *verifies* it.
 
+### The delivery window — what the schedule cannot protect
+
+Everything above governs when the workflow *runs*. Nothing in it governs when
+the bot *sends*, and those came apart on 2026-08-20: a `workflow_dispatch` fired
+at 01:46 Istanbul to test a code change, ran the full send path because
+`--only-if-new` was only passed on `schedule`, and delivered the report, the
+three cards and the tweet drafts to the public channel at **02:17 in the
+morning**. The cron was never involved. It also re-reported a session
+(2026-08-18) that had already gone out.
+
+Two fixes, and both are needed:
+
+* `config.within_delivery_window()` — a report may only be delivered between
+  **07:00 and 14:00 Istanbul**. Outside it, `cli.main()` flips `args.dry_run`
+  before dispatching the command, which is the single point every send in the
+  process sits behind: the owner's copy, the channel copy, the cards and the
+  drafts. The run still fetches, still stores, still prints. `--force`
+  overrides. The bounds are not arbitrary — TEFAS has not published before the
+  business morning, and the message is useless after the 13:30 order cutoff, so
+  a send outside them is by definition not the send the schedule intended.
+* The workflow now passes `--only-if-new` on a manual dispatch too, so a
+  dispatch cannot re-send a session that has already been reported. The
+  `force` input lifts both gates together for a deliberate re-send.
+
+A plain manual dispatch is therefore safe at any hour: it prints the report into
+the Actions log and sends nothing. **Do not "restore" the old behaviour where a
+dispatch always reports** — that convenience is exactly what published a report
+at 2am.
+
 ## 7. Report format (`src/formatter.py`)
 
 Rebuilt once already, from a first draft that packed every available figure in.
@@ -371,6 +400,23 @@ holds, so the seven TEFAS tables take two cards and the four BES tables take one
 The heading says **BES** (what people call the system) with BEFAS in the
 subheading (the platform the funds trade on).
 
+### The crypto card is a one-off, and deliberately different
+
+`infographic.build_crypto_card()` renders a single portrait card of the eight
+blockchain/fintech funds and their crypto weights, via `python -m src.cli
+crypto-card`. It differs from the daily cards on purpose, and the differences
+are the point: **portrait** not landscape, **no date**, **no BEFAS** in the
+source line, and the disclaimer plus the Telegram link at the foot. It carries
+no returns at all — only the weight — because the weights come from monthly KAP
+reports, and putting a day's return beside them invites the reader to connect
+two numbers that do not belong to the same period.
+
+It is a **separate builder** and is not on the daily run: the figures only change
+when new KAP reports land, so it is rendered, looked at and posted by hand.
+`build_cards()` is untouched. **The daily cards keep their own format** —
+landscape, dated, TEFAS · BEFAS · KAP in the source line — and this card's shape
+must not spread to them.
+
 **What the channel does not get:** the watchlists. Those are the owner's own
 holdings — publishing them exposes a personal portfolio and, presented as "mine",
 reads close enough to a recommendation to be worth avoiding. `daily_report`
@@ -409,21 +455,78 @@ one purpose: pulling out the codes in `config.EXTRA_FUND_CODES` (currently just
 `TMV`, 36.5bn TRY and 12,423 investors) because the commentary names them.
 **Never widen this to research, comparisons or rankings.**
 
+The fetch is not the only place this has to hold, and relying on it alone was a
+mistake. Snapshots *are* the history, and they are read back long after they are
+written — by the weekly and monthly reports, and as every daily flow baseline —
+so a snapshot taken while the query was wide carries untraded funds into rankings
+built months later. One already does: `data/snapshots/2026-08-18.csv.gz` holds
+**2,532 rows, 1,165 of them untraded**, of which 105 clear both ranking
+thresholds. The file was written by that 02:17 run, before `islem=1` was
+restored. Among the 105 are `TI1` (218bn TRY, 238,924 investors) and `GTL`
+(202bn, 347,032) — large enough to head a table, and unbuyable on TEFAS.
+
+`metrics.eligible_universe()` therefore applies `is_tefas_traded()` as well.
+That function existed already and was **never called by anything** — the rule was
+only ever enforced at fetch time. With the filter in place the 2026-08-18
+snapshot yields 462 eligible funds instead of 567. The polluted rows are left in
+the file rather than deleted: they are extra data, not wrong data, the 1,367
+traded rows beside them are intact, and §4's rule about never destroying
+snapshots applies. A blank `tefas_traded` (files written before the column
+existed) counts as traded, since that is all the old query returned.
+
 **Crypto funds are matched by name, and "teknoloji" must not be one of the
 patterns** — it returns 77 funds, nearly all semiconductor, defence or health.
 `config.CRYPTO_NAME_PATTERNS` returns exactly the eight blockchain/fintech funds
 (BCK, FJB, GBV, IJP, IVY, RBL, YZC, ZFB) and nothing else. There is no "BLO".
 
 Crypto *weights* in `config.CRYPTO_HOLDINGS` are transcribed by hand from the
-funds' monthly KAP portfolio PDFs, because every portfolio company uses a
-different layout — weights sit before the ISIN in one, after two trailing
-percentages in another, one report is OCR-damaged, and IJP splits the numbers
-and the security names into separate text blocks that have to be paired by
-position. IJP's figure is a **verified floor**: only pages whose two blocks had
-matching row counts were used, each weight cross-checked against value ÷ fund
-total, and pages that did not line up were dropped rather than guessed. Refresh
-these when new monthly reports land; there is nothing to poll, since TEFAS's
-portfolio endpoint is retired.
+funds' monthly KAP portfolio PDFs in `blockchain/`, because every portfolio
+company uses a different layout. The figure is the **share of the fund's total
+value** — the `TOPLAM (FTD GÖRE)` column — so it answers "how much of this fund
+is crypto".
+
+The first pass at this was wrong, and wrong in a way worth remembering: it read
+each PDF for the tickers it already expected and stopped there, so a fund's
+figure was the sum of the two or three positions that happened to be found, not
+its exposure. `RBL` was recorded at 24.8% (BLCN + BLOK) while it also holds two
+more blockchain ETFs, BCHN and IBLC, for 38.3% in total; `GBV` was recorded at
+7.0% against an actual 20.9%, because its OCR-damaged PDF splits each position
+over a dozen purchase lots and only a few were picked up. Rebuilt figures:
+
+| | RBL | IVY | GBV | BCK | ZFB | IJP | YZC | FJB |
+|---|---|---|---|---|---|---|---|---|
+| was | 24.8 | 20.3 | 7.0 | 17.0 | 12.3 | 5.9 | 4.5 | 2.3 |
+| is | **38.3** | **26.5** | **20.9** | **18.0** | 12.3 | **11.0** | **4.7** | **4.5** |
+
+**The inclusion rule has to be stated or the number means nothing**, so it is
+written out in full in `config.CRYPTO_HOLDINGS`'s comment and summarised on the
+card itself. In short: companies whose business *is* crypto (miners, crypto-native
+financials, bitcoin treasuries, Block) plus blockchain-thematic ETFs at face
+value; not diversified tech, not general payments or exchanges, not
+broad-innovation ETFs, and not firms with merely a crypto subsidiary.
+
+Two judgement calls inside that rule:
+
+* **Fund-of-fund holdings are looked through, ETFs are not.** `YZC` holds `IJP`,
+  and `FJB` holds `GBV`, `IJP`, `YZC` and `ZFB` — 14.5% of itself in the four.
+  Counting those at face value puts `FJB` at 16.8% when only ~4.5% of it is
+  crypto, because those funds are themselves mostly not crypto. Their measured
+  weights are known, so they are applied. A blockchain ETF's underlying is not
+  known and is thematic by construction, so it stays at face value.
+* **`KEEL Infrastructure` is excluded.** `IVY`, `BCK` and `GBV` all hold it and
+  its business could not be verified; counting it would have been a guess.
+
+Reading the reports is the awkward part. `RBL`, `IVY`, `BCK`, `ZFB` and `FJB`
+print a plain FTD column. `GBV`'s PDF is OCR-damaged — digits come out as
+letters, every `5` as `S` — and needs per-lot summing. `IJP` splits the numeric
+columns and the security names into separate text blocks that have to be paired
+by position; the currency column confirms the pairing, and every weight was
+cross-checked against value ÷ fund total. Note that all these PDFs carry KAP's
+27-byte Java serialization header before `%PDF` (§8), which `pypdf` recovers
+from with a warning.
+
+Refresh these when new monthly reports land; there is nothing to poll, since
+TEFAS's portfolio endpoint is retired.
 
 `src/market.py` supplies the only outside data: bitcoin's 24-hour move from
 CoinGecko's free tier. Turkish inflation and the lira rate are deliberately

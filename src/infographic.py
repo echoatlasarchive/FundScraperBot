@@ -264,3 +264,110 @@ def caption(path: pathlib.Path, day: date) -> str:
     return "📊 <b>{}</b>\n<i>{} kapanış verileri</i>".format(
         label, formatter.tr_date(day)
     )
+
+
+# --- one-off crypto exposure card -------------------------------------------
+#
+# Deliberately a separate builder rather than an extra table on the daily cards.
+# It answers a question that does not change day to day -- fund portfolios are
+# disclosed monthly -- and it is shaped for a single post: portrait rather than
+# landscape, no date, and no BEFAS in the source line, since every fund on it is
+# a TEFAS securities fund and the figures come from KAP, not from either
+# platform. The daily cards keep their own format; nothing here touches them.
+
+CRYPTO_WIDTH, CRYPTO_MIN_HEIGHT = 1080, 1350
+
+
+def crypto_rows(records: List[dict]) -> List[tuple]:
+    """``(code, full name, weight)`` for the crypto funds, heaviest first.
+
+    Names are taken from the snapshot so the card cannot drift from what TEFAS
+    calls a fund; a fund missing from the snapshot still gets its row, under its
+    code alone, rather than silently disappearing from the picture.
+    """
+    by_code = metrics.index_by_code(records or [])
+    rows = [
+        (code, fund_name(by_code.get(code, {})) or code, weight)
+        for code, (weight, _) in config.CRYPTO_HOLDINGS.items()
+    ]
+    return sorted(rows, key=lambda row: -row[2])
+
+
+def _crypto_html(rows: Sequence[tuple]) -> str:
+    widest = max((weight for _, _, weight in rows), default=1.0) or 1.0
+    body = "".join(
+        f'<div class="row">'
+        f'<div class="head"><span class="code">{_esc(code)}</span>'
+        f'<span class="val">{formatter.percent(weight, 1, signed=False)}</span></div>'
+        f'<div class="name">{_esc(name)}</div>'
+        f'<div class="track"><div class="bar" '
+        f'style="width:{max(weight / widest * 100.0, 1.5):.1f}%"></div></div>'
+        f"</div>"
+        for code, name, weight in rows
+    )
+    return f"""<!doctype html><html><head><meta charset="utf-8"><style>
+* {{ margin:0; padding:0; box-sizing:border-box; }}
+body {{ width:{CRYPTO_WIDTH}px; min-height:{CRYPTO_MIN_HEIGHT}px; background:{FOREST};
+        color:{CHALK}; font-family:{SANS}; -webkit-font-smoothing:antialiased;
+        display:flex; flex-direction:column; padding:56px 62px 44px; }}
+header {{ display:flex; align-items:center; gap:18px; }}
+.brand {{ font-size:34px; font-weight:700; letter-spacing:-1px; }}
+h1 {{ font-size:56px; font-weight:700; letter-spacing:-2px; line-height:1.08;
+      margin-top:38px; }}
+.sub {{ font-size:25px; color:{AMBER}; font-weight:600; margin-top:14px;
+        line-height:1.4; }}
+.list {{ margin-top:34px; display:flex; flex-direction:column; gap:19px; }}
+.head {{ display:flex; align-items:baseline; gap:16px; }}
+.code {{ font-size:38px; font-weight:700; letter-spacing:-1px; }}
+.val  {{ margin-left:auto; font-size:38px; font-weight:700;
+         font-variant-numeric:tabular-nums; color:{AMBER}; }}
+.name {{ font-size:18px; color:{MUTED}; line-height:1.3; margin-top:3px; }}
+.track {{ margin-top:9px; height:11px; border-radius:6px;
+          background:rgba(255,255,255,.07); overflow:hidden; }}
+.bar {{ height:100%; border-radius:6px; background:{AMBER}; }}
+footer {{ margin-top:auto; padding-top:26px; border-top:3px solid {RULE};
+          font-size:19px; color:{MUTED}; line-height:1.55; }}
+footer b {{ color:{AMBER}; font-weight:600; }}
+footer .src {{ margin-bottom:10px; }}
+</style></head><body>
+<header>{_mark(54)}<div class="brand">NeredeParaVar</div></header>
+<h1>TEFAS'ta kripto<br>içeren fonlar</h1>
+<div class="sub">Fonların portföyünde kripto ile ilişkili
+  varlıkların ağırlığı</div>
+<div class="list">{body}</div>
+<footer>
+  <div class="src">Kaynak: fonların {config.CRYPTO_HOLDINGS_MONTH} KAP portföy
+    raporları. Kripto madencileri, kripto borsaları ve blokzinciri ETF'leri
+    dahildir; genel teknoloji ve ödeme şirketleri hariçtir.</div>
+  <b>Yatırım tavsiyesi değildir.</b> · t.me/NeredeParaVar
+</footer>
+</body></html>"""
+
+
+def build_crypto_card(
+    records: List[dict], out_dir: pathlib.Path
+) -> Optional[pathlib.Path]:
+    """Render the crypto-exposure card. Returns the file written, or None."""
+    if not ENABLED:
+        log.info("Crypto card skipped (playwright not installed).")
+        return None
+
+    rows = crypto_rows(records)
+    if not rows:
+        return None
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    path = out_dir / "kripto_fonlari.png"
+
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch()
+        page = browser.new_page(
+            viewport={"width": CRYPTO_WIDTH, "height": CRYPTO_MIN_HEIGHT}
+        )
+        page.set_content(_crypto_html(rows))
+        page.wait_for_timeout(400)
+        page.screenshot(path=str(path), full_page=True)
+        browser.close()
+
+    log.info("Rendered %s", path.name)
+    return path

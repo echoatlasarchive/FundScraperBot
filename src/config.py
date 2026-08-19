@@ -122,28 +122,54 @@ CRYPTO_NAME_PATTERNS = (
 )
 
 # Crypto exposure read out of the funds' own KAP portfolio reports for July 2026
-# (the PDFs in blockchain/). Weight is the share of the whole portfolio.
+# (the PDFs in blockchain/). The figure is the share of the fund's *total* value
+# -- the "TOPLAM (FTD GÖRE)" column -- so it answers "how much of this fund is
+# crypto", which is the question the card and the tweet ask.
 #
 # This is a hand-refreshed snapshot, not live data. Fund portfolios are disclosed
 # monthly and TEFAS serves no breakdown at all -- its portfolio endpoint is one
 # of the retired ones -- so there is nothing to poll. Re-run the extraction when
 # new monthly reports land and update the month below with it.
 #
-# IJP's figure is a verified floor, not a total. Its report splits the numeric
-# columns and the security names into separate text blocks, so they have to be
-# paired by position; only pages where the two counts match exactly are trusted,
-# and every kept weight was cross-checked against value / fund total. Pages that
-# did not line up were discarded rather than guessed at.
+# **What counts as crypto**, applied identically to all eight funds:
+#
+#   * companies whose business *is* crypto -- miners (MARA, RIOT, CLSK, CIFR,
+#     WULF, HUT, IREN, BTDR, CORZ, HIVE, APLD), crypto-native financials (GLXY,
+#     CRCL, HOOD), bitcoin treasuries (MSTR) and Block (XYZ);
+#   * blockchain-thematic ETFs at face value (BLCN, BLOK, BCHN, IBLC), since
+#     that is what they are built to hold.
+#
+# Excluded: diversified tech and semis (NVDA, AMD, MSFT, AAPL, MU, TSM, ...),
+# general finance and payments (V, MA, PYPL, JPM, GS, BLK, NDAQ, CME, IBKR),
+# broad-innovation ETFs (ARKW, QQQ, FINX, ROBT, AIQ, THNQ, WTAI), and firms with
+# only a crypto subsidiary (SBI Holdings, GMO Internet, Customers Bancorp).
+# KEEL Infrastructure is held by IVY, BCK and GBV and is left out: its business
+# could not be verified, so counting it would be a guess.
+#
+# Two of these funds hold *other funds on this list* -- YZC holds IJP, and FJB
+# holds GBV, IJP, YZC and ZFB. Those are looked through at the held fund's own
+# measured weight rather than counted at face value, because the alternative
+# reports FJB at 16.8% when only about 4.5% of it is crypto. FJB's own direct
+# crypto holding is a single position (APLD); everything else it has comes
+# through the four Turkish funds.
+#
+# Reading the reports is the awkward part, and every issuer lays them out
+# differently: RBL, IVY, BCK, ZFB and FJB print a plain FTD column; GBV's PDF is
+# OCR-damaged (digits come out as letters, "5" as "S") and splits each position
+# over many purchase lots that have to be summed; IJP puts the numbers and the
+# security names in separate text blocks that have to be paired by position --
+# there, the currency column confirms the pairing, and every weight was
+# cross-checked against value / fund total.
 CRYPTO_HOLDINGS_MONTH = "Temmuz 2026"
 CRYPTO_HOLDINGS = {
-    "RBL": (24.8, ["BLCN %12,9", "BLOK %11,9"]),
-    "IVY": (20.3, ["HOOD %3,7", "MARA %3,4", "MSTR %3,1", "GLXY %2,3"]),
-    "BCK": (17.0, ["BLCN %4,7", "BLOK %3,7", "HOOD %3,1", "CLSK %1,2"]),
+    "RBL": (38.3, ["BLCN %12,9", "BLOK %11,7", "BCHN %7,2", "IBLC %6,6"]),
+    "IVY": (26.5, ["HOOD %3,7", "IBLC %3,5", "MARA %3,4", "MSTR %3,0"]),
+    "GBV": (20.9, ["CORZ %3,3", "BCHN %3,1", "XYZ %2,7", "MARA %2,3"]),
+    "BCK": (18.0, ["BLCN %4,7", "BLOK %3,7", "HOOD %3,0", "CLSK %1,2"]),
     "ZFB": (12.3, ["HOOD %2,4", "XYZ %2,3", "RIOT %2,1", "HUT %2,1"]),
-    "GBV": (7.0, ["CORZ %2,8", "CIFR %2,4", "MARA %0,9"]),
-    "YZC": (4.5, ["XYZ %2,6", "MSTR %2,0"]),
-    "IJP": (5.9, ["CIFR %2,1", "HOOD %1,6", "MARA %1,1"]),
-    "FJB": (2.3, ["APLD %2,3"]),
+    "IJP": (11.0, ["BLCN %2,1", "CIFR %2,1", "HOOD %1,6", "MARA %1,1"]),
+    "YZC": (4.7, ["XYZ %2,5", "MSTR %2,0", "IJP fonu %1,8"]),
+    "FJB": (4.5, ["APLD %2,3", "GBV fonu %7,4", "IJP fonu %2,7"]),
 }
 
 # A move smaller than this is not worth a post. A metals fund up 0.11% on the
@@ -155,6 +181,31 @@ MIN_TWEETWORTHY_INVESTORS = 500
 
 # Every post carries this, per the account's own notice.
 TWEET_SUFFIX = "ytd"
+
+# --- Delivery window -------------------------------------------------------
+
+# Istanbul hours, [start, end), during which a report may actually be delivered.
+#
+# Nothing else in the pipeline knows what time it is. The schedule decides when
+# the bot runs, so anything that fires the workflow outside the schedule -- a
+# manual dispatch made while testing, a re-run of an old job, a cron someone
+# edits -- delivers a full report to the public channel at that hour. That has
+# happened once already: a dispatch at 01:46 Istanbul put the report, the cards
+# and the tweet drafts out at 02:17 in the morning.
+#
+# The bounds come from what the report is for. TEFAS publishes the previous
+# session during the business morning (see storage.PUBLICATION_HOUR_ISTANBUL),
+# and the message is only useful before the 13:30 fund-order cutoff, so a
+# delivery outside 07:00-14:00 is by definition not the delivery the schedule
+# intended. Out of the window the run still fetches, stores and prints; it just
+# sends nothing, unless --force says otherwise.
+DELIVERY_WINDOW_ISTANBUL = (7, 14)
+
+
+def within_delivery_window(moment) -> bool:
+    start, end = DELIVERY_WINDOW_ISTANBUL
+    return start <= moment.hour < end
+
 
 # --- Public channel --------------------------------------------------------
 

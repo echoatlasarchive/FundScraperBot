@@ -143,6 +143,27 @@ class TestFilters(unittest.TestCase):
         self.assertEqual([r["code"] for r in rest], ["EQT"])
         self.assertEqual([r["code"] for r in money_market], ["MMF"])
 
+    def test_untraded_funds_are_excluded(self):
+        # A snapshot written while the query was wider carries funds TEFAS does
+        # not trade. They must never reach a ranking aimed at TEFAS investors,
+        # however large or widely held they are: TI1 sits in the stored file for
+        # 2026-08-18 with 218bn TRY and 238,924 investors, and cannot be bought.
+        traded = make_record("YES", tefas_traded=1)
+        untraded = make_record("NO", tefas_traded=0, aum=218_000_000_000.0,
+                               investors=238_924)
+        self.assertEqual(
+            [r["code"] for r in metrics.eligible_universe([traded, untraded])], ["YES"]
+        )
+
+    def test_snapshots_without_the_traded_column_are_kept(self):
+        # Files written before the column existed hold only traded funds, so a
+        # missing value must not empty out the historical rankings.
+        old = make_record("OLD")
+        old.pop("tefas_traded", None)
+        self.assertEqual(
+            [r["code"] for r in metrics.eligible_universe([old])], ["OLD"]
+        )
+
     def test_thinly_held_fund_is_excluded(self):
         # A private vehicle: half a billion lira, 22 investors. Real example.
         private = make_record("PPF", aum=549_797_497.0, investors=22)
@@ -681,6 +702,66 @@ class TestInfographicTables(unittest.TestCase):
 
     def test_cards_are_landscape(self):
         self.assertGreater(infographic.WIDTH, infographic.MIN_HEIGHT)
+
+
+class TestCryptoCard(unittest.TestCase):
+    """The one-off crypto card. Portrait, undated, every fund on it."""
+
+    def test_card_is_portrait(self):
+        self.assertGreater(infographic.CRYPTO_MIN_HEIGHT, infographic.CRYPTO_WIDTH)
+
+    def test_every_crypto_fund_gets_a_row_heaviest_first(self):
+        rows = infographic.crypto_rows(
+            [make_record(code) for code in config.CRYPTO_HOLDINGS]
+        )
+        self.assertEqual(len(rows), len(config.CRYPTO_HOLDINGS))
+        weights = [weight for _, _, weight in rows]
+        self.assertEqual(weights, sorted(weights, reverse=True))
+
+    def test_a_fund_missing_from_the_snapshot_still_gets_a_row(self):
+        rows = infographic.crypto_rows([])
+        self.assertEqual(len(rows), len(config.CRYPTO_HOLDINGS))
+        self.assertTrue(all(name for _, name, _ in rows))
+
+    def test_card_carries_the_disclaimer_and_no_date(self):
+        html = infographic._crypto_html(infographic.crypto_rows([]))
+        self.assertIn("Yatırım tavsiyesi değildir", html)
+        self.assertIn("t.me/NeredeParaVar", html)
+        self.assertIn("NeredeParaVar", html)
+        # This card is not about a trading session, and every fund on it is a
+        # TEFAS securities fund, so neither a date nor BEFAS belongs on it.
+        self.assertNotIn("BEFAS", html)
+        self.assertNotIn("kapanış", html)
+        for month in formatter.MONTHS_TR:
+            self.assertNotIn(
+                "{} 20".format(month), html.replace(config.CRYPTO_HOLDINGS_MONTH, "")
+            )
+
+
+class TestDeliveryWindow(unittest.TestCase):
+    """A run that fires outside the schedule must not deliver anything.
+
+    A manual dispatch at 01:46 Istanbul once put the full report, the cards and
+    the tweet drafts into the public channel at 02:17 in the morning.
+    """
+
+    def _at(self, hour):
+        return datetime(2026, 8, 20, hour, 17, tzinfo=storage.ISTANBUL)
+
+    def test_the_scheduled_hours_are_inside_the_window(self):
+        # The crons run 05:20-09:20 UTC, which is 08:20-12:20 Istanbul.
+        for hour in range(8, 13):
+            self.assertTrue(config.within_delivery_window(self._at(hour)), hour)
+
+    def test_the_small_hours_are_outside(self):
+        for hour in (0, 2, 3, 5, 6, 14, 20, 23):
+            self.assertFalse(config.within_delivery_window(self._at(hour)), hour)
+
+    def test_window_closes_before_the_order_cutoff_day_ends(self):
+        # The report is useless after the 13:30 fund-order cutoff, so the window
+        # must not stretch into the afternoon.
+        _, end = config.DELIVERY_WINDOW_ISTANBUL
+        self.assertLessEqual(end, 14)
 
 
 class TestPublicationCompleteness(unittest.TestCase):
