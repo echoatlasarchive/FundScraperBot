@@ -164,6 +164,40 @@ def session_is_published() -> bool:
     return bool(changed)
 
 
+def session_is_complete(records: List[dict]) -> bool:
+    """Has TEFAS finished publishing, or only started?
+
+    The cheap five-fund probe answers "has anything moved", which is not the same
+    question. Funds are valued and released across the morning, so an early run
+    can find the first few updated and the rest still on yesterday's prices --
+    and a report built on that mixes two sessions without looking wrong.
+
+    Measuring the whole universe settles it: a finished session moves ~99.6% of
+    prices, so anything well below that means waiting for a later attempt.
+    """
+    latest = storage.latest_snapshot_date()
+    if latest is None:
+        return True
+
+    previous = storage.load_snapshot(latest)
+    fraction = storage.published_fraction(records, previous)
+    if fraction is None:
+        log.info("Not enough overlap with %s to judge completeness.", latest)
+        return True
+
+    log.info(
+        "Published fraction against %s: %.1f%% (threshold %.0f%%).",
+        latest,
+        fraction * 100,
+        storage.PUBLISHED_THRESHOLD * 100,
+    )
+    # An unchanged universe is a session already reported, not a partial one;
+    # store() recognises that separately.
+    if fraction < 0.01:
+        return True
+    return fraction >= storage.PUBLISHED_THRESHOLD
+
+
 def resolve_data_day(records: List[dict], run_dt) -> date:
     """Which session the fetched data belongs to.
 
@@ -197,6 +231,11 @@ def run_daily(args) -> Optional[List[str]]:
         return None
 
     records = collect()
+
+    if args.only_if_new and not session_is_complete(records):
+        log.info("Session only partly published; a later run will pick it up.")
+        return None
+
     data_day = resolve_data_day(records, run_dt)
     effective_day, is_new = store(records, data_day)
 
@@ -273,8 +312,7 @@ def _build_cards(records: List[dict], day: date) -> List:
 
 def _send_cards(cards: List, day: date, chat_id: Optional[str]) -> None:
     for path in cards:
-        kind = "tefas" if "tefas" in path.name else "befas"
-        telegram.send_photo(path, infographic.caption(kind, day), chat_id=chat_id)
+        telegram.send_photo(path, infographic.caption(path, day), chat_id=chat_id)
 
 
 def _run_period(days_back: int, builder) -> List[str]:

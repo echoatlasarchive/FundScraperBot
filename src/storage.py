@@ -243,6 +243,39 @@ def snapshot_on_or_before(day: date) -> Optional[date]:
 # -- staleness ---------------------------------------------------------------
 
 
+# A fully published session moves almost every price: measured 1,360 of 1,365
+# funds (99.6%) between 2026-08-17 and 2026-08-18, and four of the five that
+# stood still were dormant funds with no assets and no investors.
+#
+# So a much lower share means TEFAS is only part-way through publishing -- funds
+# are valued and released over the morning, not all at once. Reporting then would
+# mix one session's prices with the previous one's, quietly.
+PUBLISHED_THRESHOLD = 0.95
+
+
+def published_fraction(current: List[dict], previous: Dict[str, dict]) -> Optional[float]:
+    """Share of funds whose price differs from the stored snapshot.
+
+    Returns ``None`` when there is too little overlap to judge.
+    """
+    moved = total = 0
+    for record in current:
+        base = previous.get(record.get("code"))
+        if not base:
+            continue
+        price_now = record.get("price")
+        price_before = base.get("price")
+        if not price_now or not price_before:
+            continue
+        total += 1
+        if abs(float(price_now) - float(price_before)) > 1e-12:
+            moved += 1
+
+    if total < 200:
+        return None
+    return moved / total
+
+
 def follows_consecutively(current: List[dict], previous: Dict[str, dict]) -> Optional[bool]:
     """Is ``current`` the session immediately after ``previous``?
 

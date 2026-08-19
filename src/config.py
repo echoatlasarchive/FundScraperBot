@@ -98,7 +98,7 @@ PRECIOUS_METAL_PATTERNS = (
 # promises its readers anyway.
 PUBLIC_DISCLAIMER = (
     "Burada yer alan veriler kamuya açık TEFAS, BEFAS ve KAP kaynaklarından "
-    "otomatik derlenmiştir. Yatırım tavsiyesi değildir."
+    "derlenmiştir. Yatırım tavsiyesi değildir."
 )
 
 

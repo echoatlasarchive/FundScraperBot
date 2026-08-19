@@ -598,13 +598,97 @@ class TestTweetDrafts(unittest.TestCase):
 
 
 class TestInfographicNames(unittest.TestCase):
-    def test_boilerplate_is_stripped(self):
-        record = {"name": "ANADOLU HAYAT EMEKLİLİK A.Ş. ALTIN EMEKLİLİK YATIRIM FONU"}
-        self.assertNotIn("A.Ş.", infographic.short_name(record))
-        self.assertNotIn("EMEKLİLİK YATIRIM FONU", infographic.short_name(record))
+    def test_names_are_printed_in_full(self):
+        # Truncating is not safe here: whole fund families differ only in their
+        # last word, so "... BİRİNCİ" and "... İKİNCİ SERBEST FON" collapse to
+        # the same string once shortened.
+        full = "TERA PORTFÖY BİRİNCİ SERBEST FON"
+        self.assertEqual(infographic.fund_name({"name": full}), full)
 
-    def test_long_names_are_truncated_with_an_ellipsis(self):
-        record = {"name": "X" * 120}
-        out = infographic.short_name(record, limit=30)
-        self.assertEqual(len(out), 30)
-        self.assertTrue(out.endswith("…"))
+    def test_long_names_keep_every_word(self):
+        long_name = "TÜRKİYE HAYAT VE EMEKLİLİK A.Ş. OKS KATILIM STANDART EMEKLİLİK YATIRIM FONU"
+        out = infographic.fund_name({"name": long_name})
+        self.assertEqual(out, long_name)
+        self.assertNotIn("…", out)
+
+    def test_whitespace_is_tidied(self):
+        self.assertEqual(infographic.fund_name({"name": "  AK   PORTFÖY  "}), "AK PORTFÖY")
+
+
+class TestInfographicTables(unittest.TestCase):
+    def test_table_counts_match_the_brief(self):
+        self.assertEqual(len(infographic.TEFAS_TABLES), 7)
+        self.assertEqual(len(infographic.BES_TABLES), 4)
+
+    def test_tables_are_split_into_readable_cards(self):
+        # Four tables per landscape card, so TEFAS takes two and BES one.
+        import math
+        self.assertEqual(
+            math.ceil(len(infographic.TEFAS_TABLES) / infographic.TABLES_PER_CARD), 2
+        )
+        self.assertEqual(
+            math.ceil(len(infographic.BES_TABLES) / infographic.TABLES_PER_CARD), 1
+        )
+
+    def test_cards_are_landscape(self):
+        self.assertGreater(infographic.WIDTH, infographic.MIN_HEIGHT)
+
+
+class TestPublicationCompleteness(unittest.TestCase):
+    """TEFAS releases funds across the morning, so "something moved" is not the
+    same as "the session is out"."""
+
+    def _pair(self, moved: int, total: int = 400):
+        previous = {
+            "F{:04d}".format(i): make_record("F{:04d}".format(i), price=2.0)
+            for i in range(total)
+        }
+        current = [
+            make_record(code, price=2.05 if i < moved else 2.0)
+            for i, code in enumerate(previous)
+        ]
+        return current, previous
+
+    def test_a_finished_session_passes(self):
+        current, previous = self._pair(moved=399)
+        self.assertGreaterEqual(
+            storage.published_fraction(current, previous),
+            storage.PUBLISHED_THRESHOLD,
+        )
+
+    def test_a_half_published_session_is_caught(self):
+        # The failure this guards against: an early run finds the first funds
+        # updated and reports them against yesterday's prices for the rest.
+        current, previous = self._pair(moved=200)
+        self.assertLess(
+            storage.published_fraction(current, previous),
+            storage.PUBLISHED_THRESHOLD,
+        )
+
+    def test_too_little_overlap_is_inconclusive(self):
+        current, previous = self._pair(moved=5, total=20)
+        self.assertIsNone(storage.published_fraction(current, previous))
+
+
+class TestChannelReport(unittest.TestCase):
+    def test_disclaimer_does_not_claim_automation(self):
+        self.assertNotIn("otomatik", config.PUBLIC_DISCLAIMER)
+        self.assertIn("Yatırım tavsiyesi değildir", config.PUBLIC_DISCLAIMER)
+
+    def test_platform_heading_travels_with_its_first_table(self):
+        records = metrics.attach_deltas(
+            [make_record("F{:03d}".format(i), daily_return=i * 0.1) for i in range(20)],
+            {},
+        )
+        blocks = formatter.daily_report(
+            records=records,
+            data_day=date(2026, 8, 17),
+            run_day=date(2026, 8, 18),
+            baseline_day=None,
+            public=True,
+        )
+        banners = [b for b in blocks if "TEFAS · YATIRIM FONLARI" in b]
+        self.assertEqual(len(banners), 1)
+        # The banner must not be a block on its own, or it can be packed as the
+        # last thing in a message with its table in the next one.
+        self.assertIn("EN İYİ GETİRİ", banners[0])

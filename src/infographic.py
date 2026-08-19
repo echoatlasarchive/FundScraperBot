@@ -1,12 +1,20 @@
-"""Daily infographic cards, one for TEFAS and one for BEFAS.
+"""Daily infographic cards for TEFAS and BES.
 
 Rendered as HTML and screenshotted through the Chromium that Playwright already
 installs for the KAP scraper, so the cards cost no extra dependency.
 
-Cards are 1080 wide and grow to fit their content: a fixed height silently cut
-off the last section and, worse, the disclaimer. Type, palette and the
-question-mark mark are the same ones in ``brand/build_brand.py``; if the brand
-changes, change it in both.
+Landscape, 1920 wide, two columns, growing in height to fit their content -- a
+fixed height silently cut off the last section and, worse, the disclaimer.
+
+Fund names are printed in full and wrap onto a second line rather than being
+truncated: an abbreviated Turkish fund name is frequently ambiguous, since whole
+families differ only in their last word ("... BİRİNCİ / İKİNCİ SERBEST FON").
+
+TEFAS needs seven tables and BES four; four tables is what a readable landscape
+card holds, so TEFAS is split across two cards and BES takes one.
+
+Palette, type and the question-mark mark mirror ``brand/build_brand.py``. If the
+brand changes, change it in both.
 """
 
 from __future__ import annotations
@@ -14,7 +22,7 @@ from __future__ import annotations
 import logging
 import pathlib
 from datetime import date
-from typing import List, Optional, Sequence
+from typing import Callable, List, Optional, Sequence
 
 from . import config, formatter, metrics
 
@@ -39,11 +47,14 @@ RED = "#D9705A"
 SANS = "'Helvetica Neue',Helvetica,Arial,sans-serif"
 HOOK = "M 322 352 C 322 168, 706 168, 706 358 C 706 496, 512 492, 512 606"
 
-WIDTH, MIN_HEIGHT = 1080, 1350
+WIDTH, MIN_HEIGHT = 1920, 1080
+
+# Four tables is what fits a landscape card two columns wide without shrinking
+# the type past readable.
+TABLES_PER_CARD = 4
 
 
 def _mark(px: int) -> str:
-    """The logo mark inline, sized in pixels."""
     return (
         f'<svg viewBox="0 0 1024 1024" width="{px}" height="{px}">'
         f'<g transform="translate(0,34)">'
@@ -55,102 +66,16 @@ def _mark(px: int) -> str:
     )
 
 
-# --- text helpers -----------------------------------------------------------
-
-# Every Turkish fund name carries the same scaffolding; stripping it leaves the
-# part that actually distinguishes one fund from another.
-NOISE = (
-    " (HİSSE SENEDİ YOĞUN FON)",
-    " EMEKLİLİK YATIRIM FONU",
-    " YATIRIM FONU",
-    " A.Ş.",
-)
-
-
-def short_name(record: dict, limit: int = 42) -> str:
-    name = (record.get("name") or "").strip()
-    for noise in NOISE:
-        name = name.replace(noise, "")
-    name = " ".join(name.split())
-    if len(name) > limit:
-        name = name[: limit - 1].rstrip(" ,·-") + "…"
-    return name
+def fund_name(record: dict) -> str:
+    """The full registered name, whitespace tidied. Never truncated."""
+    return " ".join((record.get("name") or "").split())
 
 
 def _esc(text: str) -> str:
     return formatter.esc(text)
 
 
-# --- card sections ----------------------------------------------------------
-
-
-def _rows(records: Sequence[dict], value_fmt, accent: str) -> str:
-    out = []
-    for index, record in enumerate(records, start=1):
-        out.append(
-            f'<div class="row">'
-            f'<div class="rank">{index}</div>'
-            f'<div class="code">{_esc(record.get("code") or "")}</div>'
-            f'<div class="name">{_esc(short_name(record))}</div>'
-            f'<div class="val" style="color:{accent}">{value_fmt(record)}</div>'
-            f"</div>"
-        )
-    if not out:
-        out.append('<div class="empty">Bugün için yeterli veri yok.</div>')
-    return "".join(out)
-
-
-def _section(title: str, body: str) -> str:
-    return f'<div class="section"><h2>{title}</h2>{body}</div>'
-
-
-def _card_html(
-    heading: str,
-    subheading: str,
-    day: date,
-    sections: str,
-) -> str:
-    return f"""<!doctype html><html><head><meta charset="utf-8"><style>
-* {{ margin:0; padding:0; box-sizing:border-box; }}
-body {{ width:{WIDTH}px; min-height:{MIN_HEIGHT}px; background:{FOREST}; color:{CHALK};
-        font-family:{SANS}; -webkit-font-smoothing:antialiased;
-        display:flex; flex-direction:column; padding:60px 58px 46px; }}
-header {{ display:flex; align-items:center; gap:22px;
-          border-bottom:3px solid {RULE}; padding-bottom:26px; }}
-.brand {{ font-size:38px; font-weight:700; letter-spacing:-1px; line-height:1; }}
-.date {{ margin-left:auto; text-align:right; font-size:26px; color:{MUTED};
-         line-height:1.35; }}
-.date b {{ display:block; color:{CHALK}; font-size:30px; font-weight:600; }}
-h1 {{ font-size:56px; font-weight:700; letter-spacing:-2px; margin:34px 0 4px; }}
-.sub {{ font-size:25px; color:{AMBER}; letter-spacing:2px; font-weight:600;
-        text-transform:uppercase; }}
-.section {{ margin-top:34px; }}
-h2 {{ font-size:27px; font-weight:700; letter-spacing:.5px; color:{CHALK};
-      padding-bottom:12px; border-bottom:2px solid {RULE}; margin-bottom:6px; }}
-.row {{ display:flex; align-items:baseline; gap:16px; padding:11px 0;
-        border-bottom:1px solid rgba(255,255,255,.05); }}
-.rank {{ width:26px; font-size:22px; color:{MUTED}; font-weight:600; }}
-.code {{ width:74px; font-size:29px; font-weight:700; letter-spacing:-.5px; }}
-.name {{ flex:1; font-size:22px; color:{MUTED}; line-height:1.25;
-         overflow:hidden; }}
-.val  {{ font-size:29px; font-weight:700; font-variant-numeric:tabular-nums;
-         white-space:nowrap; }}
-.empty {{ font-size:22px; color:{MUTED}; padding:16px 0; }}
-footer {{ margin-top:auto; padding-top:24px; border-top:3px solid {RULE};
-          font-size:20px; color:{MUTED}; line-height:1.5; }}
-footer b {{ color:{AMBER}; font-weight:600; }}
-</style></head><body>
-<header>{_mark(62)}<div class="brand">NeredeParaVar</div>
-  <div class="date"><b>{formatter.tr_date(day)}</b>kapanış verileri</div>
-</header>
-<h1>{heading}</h1><div class="sub">{subheading}</div>
-{sections}
-<footer>Kaynak: TEFAS · BEFAS · KAP — kamuya açık verilerden otomatik derlenmiştir.<br>
-<b>Yatırım tavsiyesi değildir.</b> · t.me/NeredeParaVar</footer>
-</body></html>"""
-
-
-# --- public API -------------------------------------------------------------
+# --- value formatters -------------------------------------------------------
 
 
 def _pct(record: dict) -> str:
@@ -162,13 +87,127 @@ def _flow(record: dict) -> str:
 
 
 def _investors(record: dict) -> str:
-    return "{} kişi".format(formatter.signed_int(record.get("investor_change")))
+    # signed_int uses an ASCII hyphen so the Telegram <pre> tables stay aligned;
+    # the cards are not fixed-width, so they take the typographic minus that the
+    # money figures beside them already use.
+    text = formatter.signed_int(record.get("investor_change")).replace("-", "\u2212")
+    return "{} kişi".format(text)
+
+
+# --- table specs ------------------------------------------------------------
+# (title, field, best-first, formatter, accent, plausibility guard, segment)
+
+TEFAS_TABLES = [
+    ("🚀 EN İYİ GETİRİ", "daily_return", True, _pct, AMBER, "daily", "general"),
+    ("💰 EN ÇOK PARA GİRİŞİ", "flow", True, _flow, AMBER, None, "general"),
+    ("💸 EN ÇOK PARA ÇIKIŞI", "flow", False, _flow, RED, None, "general"),
+    ("👥 YATIRIMCI SAYISI EN ÇOK ARTAN", "investor_change", True, _investors,
+     AMBER, None, "general"),
+    ("👥 YATIRIMCI SAYISI EN ÇOK AZALAN", "investor_change", False, _investors,
+     RED, None, "general"),
+    ("🏦 PARA PİYASASI — EN İYİ GETİRİ", "daily_return", True, _pct, AMBER,
+     "daily", "money_market"),
+    ("🥇 KIYMETLİ MADENLER — EN İYİ GETİRİ", "daily_return", True, _pct, AMBER,
+     "daily", "metals"),
+]
+
+BES_TABLES = [
+    ("🚀 EN İYİ GETİRİ", "daily_return", True, _pct, AMBER, "daily", "general"),
+    ("💰 EN ÇOK PARA GİRİŞİ", "flow", True, _flow, AMBER, None, "general"),
+    ("👥 YATIRIMCI SAYISI EN ÇOK ARTAN", "investor_change", True, _investors,
+     AMBER, None, "general"),
+    ("🥇 KIYMETLİ MADENLER — EN İYİ GETİRİ", "daily_return", True, _pct, AMBER,
+     "daily", "metals"),
+]
+
+
+# --- rendering --------------------------------------------------------------
+
+
+def _rows(records: Sequence[dict], value_fmt: Callable[[dict], str], accent: str) -> str:
+    if not records:
+        return '<div class="empty">Bugün için yeterli veri yok.</div>'
+    return "".join(
+        f'<div class="row">'
+        f'<div class="rank">{index}</div>'
+        f'<div class="code">{_esc(record.get("code") or "")}</div>'
+        f'<div class="name">{_esc(fund_name(record))}</div>'
+        f'<div class="val" style="color:{accent}">{value_fmt(record)}</div>'
+        f"</div>"
+        for index, record in enumerate(records, start=1)
+    )
+
+
+def _card_html(heading: str, subheading: str, day: date, tables: str, part: str) -> str:
+    return f"""<!doctype html><html><head><meta charset="utf-8"><style>
+* {{ margin:0; padding:0; box-sizing:border-box; }}
+body {{ width:{WIDTH}px; min-height:{MIN_HEIGHT}px; background:{FOREST}; color:{CHALK};
+        font-family:{SANS}; -webkit-font-smoothing:antialiased;
+        display:flex; flex-direction:column; padding:52px 60px 40px; }}
+header {{ display:flex; align-items:center; gap:22px;
+          border-bottom:3px solid {RULE}; padding-bottom:22px; }}
+.brand {{ font-size:38px; font-weight:700; letter-spacing:-1px; }}
+.title {{ margin-left:44px; display:flex; align-items:baseline; gap:18px; }}
+.title h1 {{ font-size:52px; font-weight:700; letter-spacing:-2px; }}
+.title .sub {{ font-size:24px; color:{AMBER}; letter-spacing:2px;
+               font-weight:600; text-transform:uppercase; }}
+.date {{ margin-left:auto; text-align:right; font-size:24px; color:{MUTED};
+         line-height:1.3; }}
+.date b {{ display:block; color:{CHALK}; font-size:30px; font-weight:600; }}
+.grid {{ display:grid; grid-template-columns:1fr 1fr; gap:24px 56px;
+         margin-top:26px; }}
+.section {{ break-inside:avoid; }}
+h2 {{ font-size:24px; font-weight:700; color:{CHALK}; padding-bottom:9px;
+      border-bottom:2px solid {RULE}; margin-bottom:2px; }}
+.row {{ display:flex; align-items:baseline; gap:14px; padding:9px 0;
+        border-bottom:1px solid rgba(255,255,255,.05); }}
+.rank {{ width:22px; font-size:19px; color:{MUTED}; font-weight:600;
+         flex:none; }}
+.code {{ width:66px; font-size:26px; font-weight:700; letter-spacing:-.5px;
+         flex:none; }}
+.name {{ flex:1; font-size:18px; color:{MUTED}; line-height:1.25; }}
+.val  {{ font-size:25px; font-weight:700; font-variant-numeric:tabular-nums;
+         white-space:nowrap; flex:none; text-align:right; min-width:170px; }}
+.empty {{ font-size:19px; color:{MUTED}; padding:14px 0; }}
+footer {{ margin-top:auto; padding-top:22px; border-top:3px solid {RULE};
+          display:flex; align-items:flex-end; gap:24px;
+          font-size:19px; color:{MUTED}; line-height:1.5; }}
+footer b {{ color:{AMBER}; font-weight:600; }}
+footer .part {{ margin-left:auto; white-space:nowrap; }}
+</style></head><body>
+<header>{_mark(58)}<div class="brand">NeredeParaVar</div>
+  <div class="title"><h1>{heading}</h1><div class="sub">{subheading}</div></div>
+  <div class="date"><b>{formatter.tr_date(day)}</b>kapanış verileri</div>
+</header>
+<div class="grid">{tables}</div>
+<footer><div>Kaynak: TEFAS · BEFAS · KAP — kamuya açık verilerden derlenmiştir.<br>
+<b>Yatırım tavsiyesi değildir.</b> · t.me/NeredeParaVar</div>
+<div class="part">{part}</div></footer>
+</body></html>"""
+
+
+def _build_sections(segments: dict, specs, limit: int) -> List[str]:
+    out = []
+    for title, key, reverse, fmt, accent, guard, segment in specs:
+        rows = metrics.top_by(
+            segments.get(segment, []), key, reverse=reverse, limit=limit, guard=guard
+        )
+        out.append(
+            '<div class="section"><h2>{}</h2>{}</div>'.format(
+                title, _rows(rows, fmt, accent)
+            )
+        )
+    return out
+
+
+def _chunk(items: List[str], size: int) -> List[List[str]]:
+    return [items[i : i + size] for i in range(0, len(items), size)]
 
 
 def build_cards(
     records: List[dict], day: date, out_dir: pathlib.Path
 ) -> List[pathlib.Path]:
-    """Render the TEFAS and BEFAS cards. Returns the files written.
+    """Render every card. Returns the files written, in reading order.
 
     Returns an empty list rather than raising if rendering is unavailable: the
     text report is the thing that must go out.
@@ -181,33 +220,11 @@ def build_cards(
     tefas, befas = metrics.split_by_platform(eligible)
     limit = config.TOP_N
 
-    def general(rows):
-        return metrics.split_segments(rows)["general"]
-
     plans = [
-        (
-            "tefas",
-            "TEFAS",
-            "Yatırım Fonları",
-            general(tefas),
-            [
-                ("🚀 GÜNÜN EN İYİ GETİRİLERİ", "daily_return", True, _pct, AMBER, "daily"),
-                ("💰 EN ÇOK PARA GİRİŞİ", "flow", True, _flow, AMBER, None),
-                ("💸 EN ÇOK PARA ÇIKIŞI", "flow", False, _flow, RED, None),
-            ],
-        ),
-        (
-            "befas",
-            "BEFAS",
-            "Emeklilik Fonları",
-            general(befas),
-            [
-                ("🚀 GÜNÜN EN İYİ GETİRİLERİ", "daily_return", True, _pct, AMBER, "daily"),
-                ("💰 EN ÇOK PARA GİRİŞİ", "flow", True, _flow, AMBER, None),
-                ("👥 YATIRIMCI SAYISI EN ÇOK ARTAN", "investor_change", True,
-                 _investors, AMBER, None),
-            ],
-        ),
+        # "BES" is what people call the pension system; "BEFAS" is the platform
+        # the funds trade on, so it belongs in the subheading, not the title.
+        ("tefas", "TEFAS", "Yatırım Fonları", metrics.split_segments(tefas), TEFAS_TABLES),
+        ("bes", "BES", "BEFAS · Emeklilik Fonları", metrics.split_segments(befas), BES_TABLES),
     ]
 
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -216,35 +233,34 @@ def build_cards(
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch()
         page = browser.new_page(viewport={"width": WIDTH, "height": MIN_HEIGHT})
-        for slug, heading, subheading, pool, specs in plans:
-            sections = "".join(
-                _section(
-                    title,
-                    _rows(
-                        metrics.top_by(
-                            pool, key, reverse=reverse, limit=limit, guard=guard
-                        ),
-                        fmt,
-                        colour,
-                    ),
+
+        for slug, heading, subheading, segments, specs in plans:
+            groups = _chunk(_build_sections(segments, specs, limit), TABLES_PER_CARD)
+            for index, group in enumerate(groups, start=1):
+                part = (
+                    "{}/{}".format(index, len(groups)) if len(groups) > 1 else ""
                 )
-                for title, key, reverse, fmt, colour, guard in specs
-            )
-            page.set_content(_card_html(heading, subheading, day, sections))
-            page.wait_for_timeout(400)
-            path = out_dir / "{}_{}.png".format(day.isoformat(), slug)
-            # full_page so a long card keeps its footer instead of being clipped
-            page.screenshot(path=str(path), full_page=True)
-            written.append(path)
-            log.info("Rendered %s", path.name)
+                page.set_content(
+                    _card_html(heading, subheading, day, "".join(group), part)
+                )
+                page.wait_for_timeout(400)
+                name = "{}_{}{}.png".format(
+                    day.isoformat(), slug, "" if len(groups) == 1 else "_{}".format(index)
+                )
+                path = out_dir / name
+                # full_page so a long card keeps its footer instead of being clipped
+                page.screenshot(path=str(path), full_page=True)
+                written.append(path)
+                log.info("Rendered %s", name)
+
         browser.close()
 
     return written
 
 
-def caption(kind: str, day: date) -> str:
+def caption(path: pathlib.Path, day: date) -> str:
     """Telegram caption for a card. Kept short; the card carries the detail."""
-    label = "TEFAS · Yatırım Fonları" if kind == "tefas" else "BEFAS · Emeklilik Fonları"
+    label = "TEFAS · Yatırım Fonları" if "_tefas" in path.name else "BES · Emeklilik Fonları"
     return "📊 <b>{}</b>\n<i>{} kapanış verileri</i>".format(
         label, formatter.tr_date(day)
     )

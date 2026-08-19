@@ -282,17 +282,22 @@ def _platform_section(
     sort_key: str = "daily_return",
 ) -> List[str]:
     segments = metrics.split_segments(records)
-    blocks = ["━━━━━━━━━━━━━━━━━━━━\n<b>{}</b>".format(heading)]
+    banner = "━━━━━━━━━━━━━━━━━━━━\n<b>{}</b>".format(heading)
 
     if not any(segments.values()):
-        blocks.append("<i>Eşikleri geçen fon yok.</i>")
-        return blocks
+        return [banner + "\n<i>Eşikleri geçen fon yok.</i>"]
+
+    blocks: List[str] = []
 
     general = segments["general"]
 
     blocks += _returns_ranking_block(
         "🚀 EN İYİ GETİRİ", general, config.TOP_N, guard, sort_key
     )
+    # The platform banner rides along with the first table. Left as a block of
+    # its own it could be packed as the last thing in a message, stranding the
+    # heading from everything it introduces.
+    blocks[0] = banner + "\n\n" + blocks[0]
 
     blocks.append(
         _block(

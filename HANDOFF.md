@@ -40,7 +40,7 @@ secret lives in the code.
 | Repo | https://github.com/echoatlasarchive/FundScraperBot |
 | Workflows | `daily.yml` (weekdays, hourly 05:20–09:20 UTC), `periodic.yml` (Mon + 1st) |
 | Secrets set | `TELEGRAM_TOKEN`, `TELEGRAM_CHAT_ID`, `TELEGRAM_CHANNEL_ID` |
-| Tests | 53, `python -m unittest discover -s tests` |
+| Tests | 62, `python -m unittest discover -s tests` |
 | Public channel | [@NeredeParaVar](https://t.me/NeredeParaVar), id `-1004445596324` |
 | Brand assets | `brand/`, regenerate with `python brand/build_brand.py` |
 | History | Building from scratch; see §4 |
@@ -225,10 +225,21 @@ lateness back:
 1. **Fire early and repeatedly** — hourly from 05:20 UTC, so a queue delay still
    leaves room before the cutoff.
 2. **Fire off the hour** (`:20`), which is measurably less congested.
-3. **`--only-if-new`** — each attempt probes five funds (`cli.PROBE_CODES`)
-   against the newest snapshot and exits in seconds unless something moved. The
-   first attempt with fresh data reports; the rest are free. Public repo, so
-   unlimited Actions minutes — the extra attempts cost nothing.
+3. **`--only-if-new`** — two gates, in order of cost:
+   * `cli.session_is_published()` probes five funds (`cli.PROBE_CODES`) against
+     the newest snapshot and exits in seconds unless something moved.
+   * `cli.session_is_complete()` then checks the *whole* universe after the
+     scan. This is the important one. TEFAS values and releases funds across
+     the morning, so "something moved" does not mean "the session is out" — an
+     early run can find the first funds updated and everything else still on
+     yesterday's prices, and a report built on that silently mixes two
+     sessions. A finished session moves **99.6%** of prices (measured: 1,360 of
+     1,365 between 2026-08-17 and 2026-08-18, and four of the five that stood
+     still were dormant funds with no assets and no investors), so
+     `storage.PUBLISHED_THRESHOLD` is 0.95 and anything below it waits for a
+     later attempt.
+
+   Public repo, so unlimited Actions minutes — a discarded scan costs nothing.
 
 That probe also retired the last of the clock guessing. `cli.resolve_data_day()`
 now takes the trading day from the **snapshot chain** — if the price identity
@@ -237,7 +248,8 @@ is — and falls back to `data_date_for()` only on a first run or after a gap th
 chain cannot bridge.
 
 **Do not "simplify" this back to one cron.** The delay is GitHub's and is not
-going away.
+going away, and a fixed hour would *assume* publication is finished where the
+completeness gate *verifies* it.
 
 ## 7. Report format (`src/formatter.py`)
 
@@ -348,8 +360,16 @@ circle), X header 1500x500 with content clear of the lower-left avatar overlay,
 YouTube banner 2560x1440 with everything inside the central 1546x423 that phones
 do not crop.
 
-`src/infographic.py` mirrors the same palette and mark for the daily cards. If
-the brand changes, change it in both places.
+`src/infographic.py` mirrors the same palette and mark for the daily cards.
+If the brand changes, change it in both places.
+
+Cards are landscape 1920-wide, two columns, growing in height to fit. Fund names
+are printed **in full** and wrap rather than truncating — whole Turkish fund
+families differ only in their last word ("... BİRİNCİ / İKİNCİ SERBEST FON"), so
+an ellipsis makes them ambiguous. Four tables is what a readable landscape card
+holds, so the seven TEFAS tables take two cards and the four BES tables take one.
+The heading says **BES** (what people call the system) with BEFAS in the
+subheading (the platform the funds trade on).
 
 **What the channel does not get:** the watchlists. Those are the owner's own
 holdings — publishing them exposes a personal portfolio and, presented as "mine",
