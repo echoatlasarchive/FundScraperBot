@@ -370,17 +370,36 @@ def crypto_funds(records: List[dict], when: str) -> Optional[List[str]]:
     if tail:
         thread.append(tail)
 
-    thread.append(
-        _finish(
-            [
-                "Bu fonlar kripto parayı doğrudan tutmaz;",
-                "blokzinciri ve fintek şirketlerinin hisselerine yatırım yapar.",
-                "",
-                "Portföy ağırlıkları için fonun KAP raporuna bakın.",
-            ]
-        )
-        or ""
+    # Holdings come from the funds' own monthly KAP reports; see
+    # config.CRYPTO_HOLDINGS for why they cannot be fetched live.
+    ranked = sorted(
+        config.CRYPTO_HOLDINGS.items(), key=lambda item: -item[1][0]
     )
+    weight_lines = [
+        "{} %{} · {}".format(
+            tag(code),
+            formatter.tr_number(total, 1),
+            ", ".join(positions[:2]),
+        )
+        for code, (total, positions) in ranked[:5]
+    ]
+    weights = _finish(
+        ["📁 Kripto ağırlığı en yüksek fonlar ({})".format(config.CRYPTO_HOLDINGS_MONTH), ""]
+        + weight_lines
+    )
+    if weights:
+        thread.append(weights)
+
+    closing = _finish(
+        [
+            "Bu fonlar kripto parayı doğrudan tutmaz;",
+            "madenci, borsa ve blokzinciri şirketlerinin hisselerini alır.",
+            "",
+            "Ağırlıklar aylık KAP portföy raporlarından.",
+        ]
+    )
+    if closing:
+        thread.append(closing)
     return [t for t in thread if t]
 
 

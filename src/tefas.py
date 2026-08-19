@@ -158,10 +158,17 @@ class TefasClient:
              "getiri1a", "getiri3a", "getiri6a", "getiri1y", "getiriyb",
              "getiri3y", "getiri5y", "getiriOrani", "riskDegeri"}
         """
+        # No "islem" key on purpose. The field selects the trading status:
+        # 1 returns only the funds traded on TEFAS (1,056 YAT), 0 only those that
+        # are not (1,076), and omitting it returns both (2,132) with the
+        # `tefasDurum` flag telling them apart.
+        #
+        # Both are wanted. Plenty of funds outside TEFAS are large and widely
+        # held -- TMV alone has 36.5 billion TRY and 12,423 investors -- and
+        # leaving them out silently understated the market.
         payload = {
             "dil": "TR",
             "fonTipi": fund_type,
-            "islem": 1,
             "donemGetiri1a": "1",
             "donemGetiri3a": "1",
             "donemGetiri6a": "1",

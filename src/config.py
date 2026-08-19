@@ -113,6 +113,27 @@ CRYPTO_NAME_PATTERNS = (
     "fintech",
 )
 
+# Crypto exposure read out of the funds' own KAP portfolio reports for July 2026
+# (the PDFs in blockchain/). Weight is the share of the whole portfolio.
+#
+# This is a hand-refreshed snapshot, not live data. Fund portfolios are disclosed
+# monthly and TEFAS serves no breakdown at all -- its portfolio endpoint is one
+# of the retired ones -- so there is nothing to poll. Re-run the extraction when
+# new monthly reports land and update the month below with it.
+#
+# IJP is absent on purpose: its report lists quantities and prices but no
+# per-holding weight, so any figure here would have been invented.
+CRYPTO_HOLDINGS_MONTH = "Temmuz 2026"
+CRYPTO_HOLDINGS = {
+    "RBL": (24.8, ["BLCN %12,9", "BLOK %11,9"]),
+    "IVY": (20.3, ["HOOD %3,7", "MARA %3,4", "MSTR %3,1", "GLXY %2,3"]),
+    "BCK": (17.0, ["BLCN %4,7", "BLOK %3,7", "HOOD %3,1", "CLSK %1,2"]),
+    "ZFB": (12.3, ["HOOD %2,4", "XYZ %2,3", "RIOT %2,1", "HUT %2,1"]),
+    "GBV": (7.0, ["CORZ %2,8", "CIFR %2,4", "MARA %0,9"]),
+    "YZC": (4.5, ["XYZ %2,6", "MSTR %2,0"]),
+    "FJB": (2.3, ["APLD %2,3"]),
+}
+
 # A move smaller than this is not worth a post. A metals fund up 0.11% on the
 # day says nothing to anyone, and publishing it trains readers to ignore the
 # account.

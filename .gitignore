@@ -11,3 +11,6 @@ tefas_scraper.py
 
 # Rendered cards are regenerated every run; only the source data is worth keeping.
 data/cards/
+
+# Monthly KAP portfolio PDFs, kept locally; their figures live in config.py.
+blockchain/

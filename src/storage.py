@@ -27,6 +27,7 @@ FIELDS = [
     "code",
     "name",
     "fund_type",
+    "tefas_traded",
     "umbrella",
     "category",
     "risk",
@@ -48,6 +49,7 @@ FIELDS = [
 ]
 
 _NUMERIC = {
+    "tefas_traded",
     "price",
     "daily_return",
     "shares",
@@ -84,6 +86,9 @@ def build_records(
                 "code": code,
                 "name": row.get("fonUnvan") or snap.get("fonUnvan") or "",
                 "fund_type": row.get("fonTipi") or "",
+                # 1 when the fund can be bought on TEFAS itself, 0 when it is
+                # sold only through its own distributor.
+                "tefas_traded": 1 if row.get("tefasDurum") else 0,
                 "umbrella": row.get("fonTurAciklama") or "",
                 "category": snap.get("fonKategori") or "",
                 "risk": row.get("riskDegeri") or "",

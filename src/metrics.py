@@ -72,6 +72,18 @@ def is_tefas(record: dict) -> bool:
     return (record.get("fund_type") or "") == "YAT"
 
 
+def is_tefas_traded(record: dict) -> bool:
+    """Buyable through TEFAS itself, rather than only from its distributor.
+
+    Snapshots written before this field existed have no value for it; those are
+    all TEFAS-traded, since that is all the old query returned.
+    """
+    value = record.get("tefas_traded")
+    if value is None or value == "":
+        return True
+    return bool(_num(value))
+
+
 # -- eligibility -------------------------------------------------------------
 
 

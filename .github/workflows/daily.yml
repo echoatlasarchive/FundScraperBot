@@ -31,7 +31,9 @@ concurrency:
 jobs:
   report:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # Scanning the full universe (~2,530 funds) takes about 15 minutes and
+    # the KAP pass another 7, so the budget has headroom over that.
+    timeout-minutes: 50
 
     steps:
       - uses: actions/checkout@v4
