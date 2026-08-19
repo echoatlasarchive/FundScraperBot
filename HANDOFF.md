@@ -401,10 +401,29 @@ Drafts come back as `{"title", "tweets": [...]}`; more than one tweet means a
 thread. Threads exist because the account is not X Premium, so 280 characters is
 the hard limit.
 
+**Only funds TEFAS actually trades may be ranked or researched.** The returns
+query takes `islem=1` for that. Omitting the field returns the untraded funds
+too, and an earlier version did — which put funds nobody can buy on TEFAS into
+leaderboards aimed at TEFAS investors. The untraded set is fetched for exactly
+one purpose: pulling out the codes in `config.EXTRA_FUND_CODES` (currently just
+`TMV`, 36.5bn TRY and 12,423 investors) because the commentary names them.
+**Never widen this to research, comparisons or rankings.**
+
 **Crypto funds are matched by name, and "teknoloji" must not be one of the
 patterns** — it returns 77 funds, nearly all semiconductor, defence or health.
 `config.CRYPTO_NAME_PATTERNS` returns exactly the eight blockchain/fintech funds
 (BCK, FJB, GBV, IJP, IVY, RBL, YZC, ZFB) and nothing else. There is no "BLO".
+
+Crypto *weights* in `config.CRYPTO_HOLDINGS` are transcribed by hand from the
+funds' monthly KAP portfolio PDFs, because every portfolio company uses a
+different layout — weights sit before the ISIN in one, after two trailing
+percentages in another, one report is OCR-damaged, and IJP splits the numbers
+and the security names into separate text blocks that have to be paired by
+position. IJP's figure is a **verified floor**: only pages whose two blocks had
+matching row counts were used, each weight cross-checked against value ÷ fund
+total, and pages that did not line up were dropped rather than guessed. Refresh
+these when new monthly reports land; there is nothing to poll, since TEFAS's
+portfolio endpoint is retired.
 
 `src/market.py` supplies the only outside data: bitcoin's 24-hour move from
 CoinGecko's free tier. Turkish inflation and the lira rate are deliberately
