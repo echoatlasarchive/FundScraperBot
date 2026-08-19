@@ -3,6 +3,10 @@
 Daily, weekly and monthly TEFAS + BEFAS fund reports delivered to Telegram,
 driven entirely by GitHub Actions. No server, no database, no paid API.
 
+Two audiences: the owner's private chat gets everything, and the public channel
+[@NeredeParaVar](https://t.me/NeredeParaVar) gets the same rankings without the
+owner's watchlists, plus a disclaimer.
+
 Code and comments are English. The bot's output is Turkish.
 
 ## What it reports
@@ -29,6 +33,13 @@ repeats a best-returns table for its sub-segments:
 On a Monday the window reaches back to the previous Friday, so anything filed
 after Friday's report is not missed. Each entry carries the subject, a short
 summary and a link to any attached PDF.
+
+**Infographic cards** — one for TEFAS and one for BEFAS, rendered in the
+channel's palette and sent as images to both the owner and the channel.
+See `src/infographic.py`.
+
+**Tweet drafts** — a handful of sentences built from the day's numbers, sent to
+the owner only, to edit and post by hand. See `src/tweets.py`.
 
 **Weekly / monthly** — the same shape over a longer window, plus the funds whose
 AUM grew the most.
@@ -152,6 +163,7 @@ Actions**:
 |---|---|---|
 | `TELEGRAM_TOKEN` | yes | BotFather token |
 | `TELEGRAM_CHAT_ID` | yes | where reports are sent |
+| `TELEGRAM_CHANNEL_ID` | no | public channel; omit to report to the owner only |
 | `TEFAS_TOKEN` | no | only if TEFAS rotates its static token |
 
 The daily workflow needs write access to commit snapshots: **Settings → Actions
@@ -159,12 +171,18 @@ The daily workflow needs write access to commit snapshots: **Settings → Action
 
 ### 3. Schedule
 
-`daily.yml` runs at 09:00 UTC (12:00 Istanbul) on weekdays. `periodic.yml` runs
-weekly on Monday and monthly on the 1st, 15 minutes later, and reads the
-snapshots the daily job committed rather than fetching anything itself.
+`daily.yml` fires hourly from 05:20 to 09:20 UTC on weekdays, and each attempt
+exits within seconds unless TEFAS has published a session that is not already
+stored. The first attempt with fresh data sends the report.
 
-GitHub's scheduler queues jobs under load, so a run can start several minutes
-late. That is normal and harmless here.
+That shape exists because GitHub queues scheduled runs heavily — measured 62 and
+63 minutes late on consecutive days for an on-the-hour cron — and a full run
+takes about 25 minutes. A single 09:00 cron delivered at 13:28 Istanbul, past
+the 13:30 fund-order cutoff. Firing early, repeatedly, and off the hour fixes
+it, and the probe keeps the extra attempts free.
+
+`periodic.yml` runs weekly on Monday and monthly on the 1st, and reads the
+snapshots the daily job committed rather than fetching anything itself.
 
 ## Running locally
 
@@ -201,7 +219,10 @@ src/metrics.py     flows, deltas, rankings, filters
 src/formatter.py   Turkish Telegram rendering
 src/telegram.py    delivery and failure alerts
 src/kap.py         KAP disclosures for watchlist funds
+src/infographic.py daily TEFAS/BEFAS cards as PNGs
+src/tweets.py      draft posts for X, owner only
 src/cli.py         entry point
+brand/             logos and covers, and the script that regenerates them
 ```
 
 ## Known gaps
