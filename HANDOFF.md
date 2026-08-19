@@ -496,7 +496,7 @@ over a dozen purchase lots and only a few were picked up. Rebuilt figures:
 | | RBL | IVY | GBV | BCK | ZFB | IJP | YZC | FJB |
 |---|---|---|---|---|---|---|---|---|
 | was | 24.8 | 20.3 | 7.0 | 17.0 | 12.3 | 5.9 | 4.5 | 2.3 |
-| is | **38.3** | **26.5** | **20.9** | **18.0** | 12.3 | **11.0** | **4.7** | **4.5** |
+| is | **38.3** | **28.9** | **22.3** | **18.6** | 12.3 | **11.0** | **4.7** | **4.6** |
 
 **The inclusion rule has to be stated or the number means nothing**, so it is
 written out in full in `config.CRYPTO_HOLDINGS`'s comment and summarised on the
@@ -513,8 +513,11 @@ Two judgement calls inside that rule:
   crypto, because those funds are themselves mostly not crypto. Their measured
   weights are known, so they are applied. A blockchain ETF's underlying is not
   known and is thematic by construction, so it stays at face value.
-* **`KEEL Infrastructure` is excluded.** `IVY`, `BCK` and `GBV` all hold it and
-  its business could not be verified; counting it would have been a guess.
+* **`KEEL Infrastructure` is counted in**, by the owner's decision. It is the
+  one holding on the list whose business could not be verified from the reports,
+  so it is flagged in `config.CRYPTO_HOLDINGS` rather than left silent: it is
+  worth 2.4 in `IVY`, 1.5 in `GBV` and 0.7 in `BCK`, and those are the three
+  figures to correct if it ever turns out not to be crypto-linked.
 
 Reading the reports is the awkward part. `RBL`, `IVY`, `BCK`, `ZFB` and `FJB`
 print a plain FTD column. `GBV`'s PDF is OCR-damaged — digits come out as

@@ -143,8 +143,11 @@ CRYPTO_NAME_PATTERNS = (
 # general finance and payments (V, MA, PYPL, JPM, GS, BLK, NDAQ, CME, IBKR),
 # broad-innovation ETFs (ARKW, QQQ, FINX, ROBT, AIQ, THNQ, WTAI), and firms with
 # only a crypto subsidiary (SBI Holdings, GMO Internet, Customers Bancorp).
-# KEEL Infrastructure is held by IVY, BCK and GBV and is left out: its business
-# could not be verified, so counting it would be a guess.
+# KEEL Infrastructure -- held by IVY (2.4), BCK (0.7) and GBV (1.5) -- is counted
+# in, by the owner's decision. It is the one position on this list whose business
+# could not be verified from the reports themselves, so it is called out here
+# rather than buried: if it ever turns out not to be crypto-linked, those three
+# funds are the ones to correct, and by those amounts.
 #
 # Two of these funds hold *other funds on this list* -- YZC holds IJP, and FJB
 # holds GBV, IJP, YZC and ZFB. Those are looked through at the held fund's own
@@ -163,13 +166,13 @@ CRYPTO_NAME_PATTERNS = (
 CRYPTO_HOLDINGS_MONTH = "Temmuz 2026"
 CRYPTO_HOLDINGS = {
     "RBL": (38.3, ["BLCN %12,9", "BLOK %11,7", "BCHN %7,2", "IBLC %6,6"]),
-    "IVY": (26.5, ["HOOD %3,7", "IBLC %3,5", "MARA %3,4", "MSTR %3,0"]),
-    "GBV": (20.9, ["CORZ %3,3", "BCHN %3,1", "XYZ %2,7", "MARA %2,3"]),
-    "BCK": (18.0, ["BLCN %4,7", "BLOK %3,7", "HOOD %3,0", "CLSK %1,2"]),
+    "IVY": (28.9, ["HOOD %3,7", "IBLC %3,5", "MARA %3,4", "MSTR %3,0"]),
+    "GBV": (22.3, ["CORZ %3,3", "BCHN %3,1", "XYZ %2,7", "MARA %2,3"]),
+    "BCK": (18.6, ["BLCN %4,7", "BLOK %3,7", "HOOD %3,0", "CLSK %1,2"]),
     "ZFB": (12.3, ["HOOD %2,4", "XYZ %2,3", "RIOT %2,1", "HUT %2,1"]),
     "IJP": (11.0, ["BLCN %2,1", "CIFR %2,1", "HOOD %1,6", "MARA %1,1"]),
     "YZC": (4.7, ["XYZ %2,5", "MSTR %2,0", "IJP fonu %1,8"]),
-    "FJB": (4.5, ["APLD %2,3", "GBV fonu %7,4", "IJP fonu %2,7"]),
+    "FJB": (4.6, ["APLD %2,3", "GBV fonu %7,4", "IJP fonu %2,7"]),
 }
 
 # A move smaller than this is not worth a post. A metals fund up 0.11% on the
