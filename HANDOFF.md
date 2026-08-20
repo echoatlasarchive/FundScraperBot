@@ -38,9 +38,9 @@ secret lives in the code.
 | | |
 |---|---|
 | Repo | https://github.com/echoatlasarchive/FundScraperBot |
-| Workflows | `daily.yml` (weekdays, hourly 05:20–09:20 UTC), `periodic.yml` (Mon + 1st) |
+| Workflows | `daily.yml` (weekdays, 08:20 UTC), `periodic.yml` (Mon + 1st) |
 | Secrets set | `TELEGRAM_TOKEN`, `TELEGRAM_CHAT_ID`, `TELEGRAM_CHANNEL_ID` |
-| Tests | 83, `python -m unittest discover -s tests` |
+| Tests | 89, `python -m unittest discover -s tests` |
 | Public channel | [@NeredeParaVar](https://t.me/NeredeParaVar), id `-1004445596324` |
 | Brand assets | `brand/`, regenerate with `python brand/build_brand.py` |
 | History | Building from scratch; see §4 |
@@ -134,6 +134,51 @@ inferred label disagrees. If you see that warning, trust it.
 
 Also pin the clock **once at the start of the run**, before `collect()` — the
 fetch takes ~10 minutes and can cross midnight.
+
+### 4a. An unpriced fund is a placeholder, not a missing row
+
+The failure that ended the multi-cron schedule, and the more important half of
+it. **TEFAS does not omit a fund it has not valued yet.** It returns the row
+with `sonFiyat`, `portBuyukluk` and `payAdet` all zero, and `gunlukGetiri` at
+**-100**, because the price nominally fell to nothing. `yatirimciSayi` stays
+populated, so the record does not look empty.
+
+On 2026-08-20 eighteen funds were in that state when the run fetched at 10:29,
+and the report went out with `PHE` at **-100%**.
+
+Every guard missed it, each for its own reason:
+
+* `storage.published_fraction()` **skips any record without a usable price on
+  either side**, so the placeholders left its denominator rather than counting
+  against it. It read **99.5%** against a 95% threshold and passed. Raising the
+  threshold would not have helped — eighteen funds out of 1,370 is 1.3%.
+* `MAX_ABS_DAILY_RETURN_PCT` (25%) does keep -100 out of the *rankings*, via
+  `top_by(guard="daily")`. But the **watchlist block prints unconditionally** —
+  it is a fixed list of the owner's funds, not a ranking — and `PHE` is on it.
+  `PBR` is in `POPULAR_GROUPS`, so the tweet drafts carried it too.
+* The snapshot was then **stored** with those zeros, which makes it the next
+  day's flow baseline: `PHE` going 0 → 9.3bn units reads as an enormous inflow.
+
+Two fixes, at different depths:
+
+* `storage.unvalued_funds()` is the gate. **The tell is the transition, not the
+  zero.** Some funds sit at zero permanently — dormant or wound up, `ETN` and
+  `ZTV` among them, three on that day — so a plain "any zero price" test would
+  block every run for ever. A fund that had a real price in the baseline and has
+  none now is a fund still being valued. Even one is disqualifying: nothing is
+  reported and nothing is stored.
+* `metrics.is_valued()` is the backstop, applied in `attach_deltas()`, which
+  every path runs through. An unvalued record's `daily_return`, `flow` and
+  `aum_change` are blanked so they render as `—`. This matters because a
+  **forced manual run skips the gate entirely** — `--force` drops
+  `--only-if-new` — and that is exactly the run someone makes when they are
+  impatient about a late session.
+
+The 2026-08-19 snapshot was repaired by re-fetching the same session later the
+same day, once TEFAS had finished: the platform serves the previous close until
+the next one is published, so a re-fetch inside that window costs nothing but
+time. `store()` already handles it — same `data_day` as the newest file means
+the "re-fetched session, refreshing the snapshot" branch.
 
 ---
 
@@ -247,9 +292,36 @@ confirms this data is the session after the newest stored one, that is what it
 is — and falls back to `data_date_for()` only on a first run or after a gap the
 chain cannot bridge.
 
-**Do not "simplify" this back to one cron.** The delay is GitHub's and is not
-going away, and a fixed hour would *assume* publication is finished where the
-completeness gate *verifies* it.
+### Superseded on 2026-08-20 — it is now one cron at 08:20 UTC
+
+Everything above is still true about GitHub's queue, and it was still the wrong
+thing to optimise for. Firing early only helps if the data is there, and it is
+not: the constraint is when **TEFAS** finishes, not when GitHub gets round to
+us. Each extra early attempt was therefore not a free retry but another chance
+to publish a wrong report, with the completeness gate as the only thing in the
+way — and on 2026-08-20 that gate let one through (see §4a).
+
+Two measurements settled it:
+
+* A run that fetched at **10:29 Istanbul** found eighteen funds still unpriced,
+  `PHE` among them. The owner, watching the platform from 09:00 that morning,
+  puts the point at which most funds are settled at about **11:00**.
+* Of the five crons that day, GitHub fired **one** (07:20 UTC, nine minutes
+  late). The redundancy the schedule was built for did not materialise anyway.
+
+So: `- cron: "20 8 * * 1-5"`, 11:20 Istanbul, one attempt. The fetch starts
+after TEFAS is done, and the report still lands around 11:50, comfortably
+before the 13:30 cutoff. Starting late enough that the data is there is a
+simpler guarantee than starting early and testing whether it is.
+
+**What this costs, and it is real:** there is no second chance. If GitHub skips
+the cron, or TEFAS is unusually late, there is no report that day. So a run that
+declines to report now sends a **Telegram alert** to the owner rather than
+exiting quietly — "a later run will pick it up" stopped being true — and
+`daily.yml` can be dispatched by hand once the platform has finished.
+
+`--only-if-new` stays. It is not a retry, it is the gate that stops a holiday or
+an unfinished session being reported, and it is what raises that alert.
 
 ### The delivery window — what the schedule cannot protect
 

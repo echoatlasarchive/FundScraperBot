@@ -281,6 +281,39 @@ def published_fraction(current: List[dict], previous: Dict[str, dict]) -> Option
     return moved / total
 
 
+def unvalued_funds(current: List[dict], previous: Dict[str, dict]) -> List[str]:
+    """Funds TEFAS has not priced yet for this session.
+
+    A fund the platform has not got to is **not left out of the response** -- it
+    comes back as a placeholder, with price, AUM and units all zero and
+    ``gunlukGetiri`` at -100, because the price nominally fell to nothing. On
+    2026-08-20 eighteen funds were in that state at 10:29 Istanbul, `PHE` among
+    them, and the report printed it as a -100% day.
+
+    ``published_fraction`` cannot see this. It skips any record without a usable
+    price on either side, so the placeholders dropped out of its denominator
+    instead of counting against it: the gate read 99.5% and let the run through.
+
+    The tell is the transition, not the zero. Some funds sit at zero
+    permanently -- dormant or wound up, `ETN` and `ZTV` among them -- and would
+    block every run forever under a plain "any zero price" test. A fund that had
+    a real price in the baseline and has none now is a fund still being valued.
+    """
+    late = []
+    for record in current:
+        base = previous.get(record.get("code"))
+        if not base:
+            continue
+        try:
+            price_before = float(base.get("price") or 0)
+            price_now = float(record.get("price") or 0)
+        except (TypeError, ValueError):
+            continue
+        if price_before > 0 and price_now <= 0:
+            late.append(record.get("code") or "?")
+    return late
+
+
 def follows_consecutively(current: List[dict], previous: Dict[str, dict]) -> Optional[bool]:
     """Is ``current`` the session immediately after ``previous``?
 

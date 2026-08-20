@@ -188,15 +188,24 @@ The daily workflow needs write access to commit snapshots: **Settings → Action
 
 ### 3. Schedule
 
-`daily.yml` fires hourly from 05:20 to 09:20 UTC on weekdays, and each attempt
-exits within seconds unless TEFAS has published a session that is not already
-stored. The first attempt with fresh data sends the report.
+`daily.yml` fires once on weekdays, at **08:20 UTC — 11:20 Istanbul**, and the
+attempt exits within seconds unless TEFAS has published a session that is not
+already stored.
 
-That shape exists because GitHub queues scheduled runs heavily — measured 62 and
-63 minutes late on consecutive days for an on-the-hour cron — and a full run
-takes about 25 minutes. A single 09:00 cron delivered at 13:28 Istanbul, past
-the 13:30 fund-order cutoff. Firing early, repeatedly, and off the hour fixes
-it, and the probe keeps the extra attempts free.
+The hour is set by when TEFAS finishes, not by when the report would ideally
+land. An earlier schedule fired hourly from 05:20 UTC to absorb GitHub's queue
+delay, but firing early only helps if the data is there: a run that fetched at
+10:29 Istanbul found eighteen funds still unpriced and reported one of them at
+−100%. TEFAS does not omit a fund it has not valued — it returns the row with
+price, assets and units all zero — so an early attempt is not a free retry, it
+is another chance to publish a wrong report. Starting after the platform is
+done is the simpler guarantee, and 11:20 still leaves the report well clear of
+the 13:30 fund-order cutoff.
+
+The cost is that there is no second chance: if GitHub skips the cron, or TEFAS
+is unusually late, there is no report that day. A run that declines to report
+sends a Telegram alert to the owner rather than exiting quietly, so it can be
+dispatched by hand.
 
 `periodic.yml` runs weekly on Monday and monthly on the 1st, and reads the
 snapshots the daily job committed rather than fetching anything itself.
@@ -255,6 +264,10 @@ brand/             logos and covers, and the script that regenerates them
 ## Known gaps
 
 * **No flow history before the first run.** See above.
+* **A fund TEFAS has not priced yet is not a missing row.** It comes back with
+  price, assets and units at zero and a daily return of −100%. The run refuses
+  to report or store a session while any fund is in that state, and blanks the
+  day's figures for such a fund on the paths that skip that check.
 * Public holidays are not modelled. When TEFAS publishes nothing, the fetched
   data is byte-identical to the previous snapshot; that is detected, no new file
   is written, and the report is labelled with the older date.

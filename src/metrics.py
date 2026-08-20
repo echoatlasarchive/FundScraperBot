@@ -96,6 +96,19 @@ def _num(value) -> Optional[float]:
         return None
 
 
+def is_valued(record: dict) -> bool:
+    """Has TEFAS priced this fund for the session it is being reported in?
+
+    An unpriced fund arrives as a placeholder -- zero price, zero AUM, zero
+    units -- not as a missing row, so every derived figure for it is fiction.
+    ``storage.unvalued_funds()`` is what keeps such a session from being
+    reported at all; this is the backstop for the paths that skip that gate,
+    chiefly a forced manual run.
+    """
+    price = _num(record.get("price"))
+    return price is not None and price > 0
+
+
 def passes_size_filter(record: dict) -> bool:
     aum = _num(record.get("aum"))
     return aum is not None and aum >= config.MIN_AUM_TRY
@@ -214,6 +227,14 @@ def attach_deltas(
 
             if None not in (inv_now, inv_before):
                 investor_change = int(inv_now - inv_before)
+
+        if not is_valued(record):
+            # Nothing about this session is known for the fund yet, so none of
+            # it may be printed. The investor count and the period returns come
+            # from other fields and survive; the day's figures do not, and
+            # -100% is the placeholder speaking, not a loss.
+            enriched["daily_return"] = None
+            flow = flow_pct = aum_change = aum_change_pct = None
 
         enriched["flow"] = flow
         enriched["flow_pct"] = flow_pct

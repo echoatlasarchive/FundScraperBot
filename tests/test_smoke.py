@@ -861,6 +861,71 @@ class TestPublicationCompleteness(unittest.TestCase):
         self.assertIsNone(storage.published_fraction(current, previous))
 
 
+class TestUnvaluedFunds(unittest.TestCase):
+    """TEFAS serves a fund it has not priced yet as a placeholder, not as a
+    missing row: zero price, zero AUM, zero units, and gunlukGetiri -100.
+
+    On 2026-08-20 eighteen funds were in that state at 10:29 Istanbul and the
+    report printed PHE at -100%.
+    """
+
+    def _placeholder(self, code):
+        return make_record(code, price=0, daily_return=-100, aum=0, shares=0)
+
+    def test_a_fund_that_lost_its_price_is_flagged(self):
+        previous = {"PHE": make_record("PHE", price=4.0)}
+        self.assertEqual(
+            storage.unvalued_funds([self._placeholder("PHE")], previous), ["PHE"]
+        )
+
+    def test_a_permanently_dormant_fund_is_not_flagged(self):
+        # ETN and ZTV sit at zero every day. A plain "any zero price" test would
+        # block every run for ever.
+        previous = {"ETN": make_record("ETN", price=0)}
+        self.assertEqual(
+            storage.unvalued_funds([self._placeholder("ETN")], previous), []
+        )
+
+    def test_a_normal_session_flags_nothing(self):
+        previous = {"OK": make_record("OK", price=2.0)}
+        current = [make_record("OK", price=2.05)]
+        self.assertEqual(storage.unvalued_funds(current, previous), [])
+
+    def test_the_published_fraction_alone_does_not_catch_this(self):
+        # The regression this guards. published_fraction skips any record
+        # without a usable price, so placeholders leave its denominator instead
+        # of counting against it: the real run read 99.5% and was let through.
+        previous = {
+            "F{:04d}".format(i): make_record("F{:04d}".format(i), price=2.0)
+            for i in range(400)
+        }
+        current = [make_record(code, price=2.05) for code in previous]
+        current[0] = self._placeholder("F0000")
+        self.assertEqual(storage.published_fraction(current, previous), 1.0)
+        self.assertEqual(storage.unvalued_funds(current, previous), ["F0000"])
+
+    def test_the_days_figures_are_blanked_not_printed(self):
+        # Backstop for the paths that skip the gate, chiefly a forced run.
+        previous = {"PHE": make_record("PHE", price=4.0, shares=1_000_000_000)}
+        [out] = metrics.attach_deltas([self._placeholder("PHE")], previous)
+        self.assertIsNone(out["daily_return"])
+        self.assertIsNone(out["flow"])
+        self.assertIsNone(out["aum_change"])
+        # The investor count comes from a different field and survives.
+        self.assertEqual(out["investors"], 20_000)
+
+    def test_a_blanked_fund_renders_as_a_dash_not_as_minus_100(self):
+        previous = {"PHE": make_record("PHE", price=4.0)}
+        records = metrics.attach_deltas([self._placeholder("PHE")], previous)
+        body = formatter.render(
+            formatter._watchlist_block(
+                metrics.index_by_code(records), ["PHE"], "TAKİP", True
+            )
+        )
+        self.assertIn("PHE", body)
+        self.assertNotIn("100", body)
+
+
 class TestChannelReport(unittest.TestCase):
     def test_disclaimer_does_not_claim_automation(self):
         self.assertNotIn("otomatik", config.PUBLIC_DISCLAIMER)

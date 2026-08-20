@@ -2,18 +2,27 @@ name: Daily report
 
 on:
   schedule:
-    # The report has to land before the 13:30 Istanbul fund-order cutoff, and
-    # two things stand in the way: GitHub queues scheduled runs (measured 62 and
-    # 63 minutes late on consecutive days, both for an on-the-hour cron), and a
-    # full run takes about 25 minutes.
+    # 08:20 UTC == 11:20 Istanbul, once, on weekdays.
     #
-    # So: fire early, fire repeatedly, and off the hour -- the top of the hour is
-    # the most congested slot. Each attempt probes five funds first and exits in
-    # seconds unless TEFAS has published a session we have not stored, so the
-    # first attempt that finds fresh data sends and the rest cost nothing.
+    # The hour is set by when TEFAS finishes, not by when we would like the
+    # report. Measured 2026-08-20: a run that fetched at 10:29 Istanbul found
+    # eighteen funds still unpriced, PHE among them, and the owner -- watching
+    # the platform from 09:00 that morning -- put the point at which most funds
+    # are settled at about 11:00. So the fetch starts after that, and the
+    # report still lands well before the 13:30 fund-order cutoff.
     #
-    # 05:20 UTC == 08:20 Istanbul, through 09:20 UTC == 12:20 Istanbul.
-    - cron: "20 5,6,7,8,9 * * 1-5"
+    # One attempt, not five. The earlier hourly schedule existed to absorb
+    # GitHub's queue delay, but every extra attempt fired before TEFAS was
+    # ready, and the completeness gate was the only thing standing between an
+    # early attempt and a wrong report -- which it failed to be, once. Starting
+    # late enough that the data is there is the simpler guarantee.
+    #
+    # The cost of the single attempt: if GitHub skips this cron (it does skip
+    # them -- four of five were skipped on 2026-08-20) or TEFAS is unusually
+    # late, there is no second chance and no report that day. The run sends a
+    # Telegram alert when it declines to report, so that is visible rather than
+    # silent, and daily.yml can be dispatched by hand.
+    - cron: "20 8 * * 1-5"
   workflow_dispatch:
     inputs:
       dry_run:

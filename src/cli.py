@@ -193,6 +193,23 @@ def session_is_complete(records: List[dict]) -> bool:
         return True
 
     previous = storage.load_snapshot(latest)
+
+    # Funds still being valued come back as placeholders rather than being left
+    # out, and the fraction below cannot see them -- it skips any record without
+    # a usable price, so they leave its denominator instead of counting against
+    # it. On 2026-08-20 that let a run through at 99.5% with eighteen funds
+    # unpriced, and the report printed PHE at -100%. Even one is disqualifying:
+    # the session is still being published.
+    late = storage.unvalued_funds(records, previous)
+    if late:
+        log.info(
+            "Session incomplete: %d fund(s) not priced yet (%s%s).",
+            len(late),
+            ", ".join(sorted(late)[:12]),
+            ", ..." if len(late) > 12 else "",
+        )
+        return False
+
     fraction = storage.published_fraction(records, previous)
     if fraction is None:
         log.info("Not enough overlap with %s to judge completeness.", latest)
@@ -246,7 +263,17 @@ def run_daily(args) -> Optional[List[str]]:
     records = collect()
 
     if args.only_if_new and not session_is_complete(records):
-        log.info("Session only partly published; a later run will pick it up.")
+        # There is one scheduled attempt a day, so "a later run will pick it up"
+        # is no longer true -- staying silent here means no report at all. Tell
+        # the owner, who can re-run it by hand once TEFAS has finished.
+        log.info("Session only partly published; not reporting.")
+        if not args.dry_run:
+            telegram.send_alert(
+                "TEFAS {} seansını henüz tamamlamamış; rapor gönderilmedi.\n"
+                "Yayın tamamlandığında daily.yml'i elle tetikleyebilirsin.".format(
+                    storage.data_date_for(run_dt).isoformat()
+                )
+            )
         return None
 
     data_day = resolve_data_day(records, run_dt)
