@@ -40,7 +40,7 @@ secret lives in the code.
 | Repo | https://github.com/echoatlasarchive/FundScraperBot |
 | Workflows | `daily.yml` (weekdays, 08:20 UTC), `periodic.yml` (Mon + 1st) |
 | Secrets set | `TELEGRAM_TOKEN`, `TELEGRAM_CHAT_ID`, `TELEGRAM_CHANNEL_ID` |
-| Tests | 89, `python -m unittest discover -s tests` |
+| Tests | 90, `python -m unittest discover -s tests` |
 | Public channel | [@NeredeParaVar](https://t.me/NeredeParaVar), id `-1004445596324` |
 | Brand assets | `brand/`, regenerate with `python brand/build_brand.py` |
 | History | Building from scratch; see §4 |
@@ -161,8 +161,15 @@ Every guard missed it, each for its own reason:
 
 Two fixes, at different depths:
 
-* `storage.unvalued_funds()` is the gate. **The tell is the transition, not the
-  zero.** Some funds sit at zero permanently — dormant or wound up, `ETN` and
+* `storage.unvalued_funds()` is the gate. **The tell is a zero, not an absence,
+  and a transition, not a standing state.** A per-fund request that times out
+  leaves the row with *no* price rather than a zero — one did the same day,
+  `AIS`, out of 1,370 — and counting that as an unfinished session would hold
+  the whole day's report hostage to a single flaky request, which with one
+  scheduled attempt means no report at all. Only an explicit zero is TEFAS
+  saying "not valued yet".
+
+  **The transition matters too.** Some funds sit at zero permanently — dormant or wound up, `ETN` and
   `ZTV` among them, three on that day — so a plain "any zero price" test would
   block every run for ever. A fund that had a real price in the baseline and has
   none now is a fund still being valued. Even one is disqualifying: nothing is

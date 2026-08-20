@@ -886,6 +886,18 @@ class TestUnvaluedFunds(unittest.TestCase):
             storage.unvalued_funds([self._placeholder("ETN")], previous), []
         )
 
+    def test_a_failed_fetch_is_not_an_unfinished_session(self):
+        # A per-fund request that times out leaves the row with no price at all,
+        # not a zero. One did on 2026-08-20 (AIS, out of 1,370). Blocking on it
+        # would hold the whole day's report hostage to one flaky request, and
+        # with a single scheduled attempt that means no report at all.
+        previous = {"AIS": make_record("AIS", price=2.0)}
+        missing = make_record("AIS", price=None, daily_return=None, aum=None)
+        self.assertEqual(storage.unvalued_funds([missing], previous), [])
+        # It still must not be printed, though.
+        [out] = metrics.attach_deltas([missing], previous)
+        self.assertIsNone(out["daily_return"])
+
     def test_a_normal_session_flags_nothing(self):
         previous = {"OK": make_record("OK", price=2.0)}
         current = [make_record("OK", price=2.05)]

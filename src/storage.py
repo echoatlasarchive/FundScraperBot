@@ -304,13 +304,22 @@ def unvalued_funds(current: List[dict], previous: Dict[str, dict]) -> List[str]:
         base = previous.get(record.get("code"))
         if not base:
             continue
+        # A *missing* price is a different failure and must not land here. When
+        # a per-fund request times out -- one did on 2026-08-20, `AIS`, out of
+        # 1,370 -- the row is built with no price at all rather than a zero, and
+        # treating that as an unfinished session would hold the whole day's
+        # report hostage to a single flaky request. With one scheduled attempt
+        # and no retries that means no report at all. Only an explicit zero is
+        # TEFAS saying "not valued yet".
+        price_now = record.get("price")
+        price_before = base.get("price")
+        if price_now is None or price_now == "" or not price_before:
+            continue
         try:
-            price_before = float(base.get("price") or 0)
-            price_now = float(record.get("price") or 0)
+            if float(price_before) > 0 and float(price_now) <= 0:
+                late.append(record.get("code") or "?")
         except (TypeError, ValueError):
             continue
-        if price_before > 0 and price_now <= 0:
-            late.append(record.get("code") or "?")
     return late
 
 
