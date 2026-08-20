@@ -366,15 +366,18 @@ def _platform_section(
     return blocks
 
 
-def _kap_block(items: List[dict], note: Optional[str] = None) -> List[str]:
+def _kap_block(
+    items: List[dict], note: Optional[str] = None, public: bool = False
+) -> List[str]:
     if not items:
-        return [
-            _block(
-                "📄 KAP BİLDİRİMLERİ",
-                "",
-                note or "Takip listende dün ve bugün yeni bildirim yok.",
-            )
-        ]
+        # The two audiences watch different funds, so "your watchlist" is only
+        # true of the owner's copy.
+        empty = (
+            "Takip edilen fonlarda dün ve bugün yeni bildirim yok."
+            if public
+            else "Takip listende dün ve bugün yeni bildirim yok."
+        )
+        return [_block("📄 KAP BİLDİRİMLERİ", "", note or empty)]
 
     lines = []
     for item in items:
@@ -431,6 +434,9 @@ def daily_report(
     ``public=True`` drops the watchlist blocks and appends a disclaimer. Those
     blocks are the owner's own holdings; a public channel gets the rankings and
     the KAP disclosures, which is what it exists to provide.
+
+    ``kap_items`` is already narrowed to this audience's funds by the caller --
+    see ``kap.limited_to`` -- because the two audiences watch different sets.
     """
     by_code = metrics.index_by_code(records)
     eligible = metrics.eligible_universe(records)
@@ -479,7 +485,7 @@ def daily_report(
         include_money_market=False,
     )
 
-    blocks += _kap_block(kap_items or [], kap_note)
+    blocks += _kap_block(kap_items or [], kap_note, public=public)
     blocks.append(_footnote(len(records)))
     if public:
         blocks.append("<i>{}</i>".format(esc(config.PUBLIC_DISCLAIMER)))

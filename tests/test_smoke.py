@@ -512,6 +512,67 @@ class TestKapRendering(unittest.TestCase):
         self.assertIn("yeni bildirim yok", block)
 
 
+class TestKapAudiences(unittest.TestCase):
+    """One KAP pass, two audiences. The channel gets its own set of funds."""
+
+    def _item(self, ident, funds):
+        return {
+            "id": ident,
+            "code": funds[0],
+            "funds": list(funds),
+            "subject": "Bildirim {}".format(ident),
+            "summary": "-",
+            "date": date(2026, 8, 20),
+            "time": "09:30",
+            "attachments": ["x.pdf"],
+            "url": "https://www.kap.org.tr/tr/Bildirim/" + ident,
+        }
+
+    def test_channel_set_is_the_funds_the_commentary_names(self):
+        self.assertEqual(
+            config.PUBLIC_KAP_CODES,
+            ["TLY", "TMV", "DOH", "DFI", "THF", "KHA", "PHE", "PBR"],
+        )
+
+    def test_one_pass_covers_both_audiences_without_duplicates(self):
+        self.assertEqual(len(config.KAP_CODES), len(set(config.KAP_CODES)))
+        for code in config.ALL_WATCHED + config.PUBLIC_KAP_CODES:
+            self.assertIn(code, config.KAP_CODES)
+
+    def test_only_the_audience_own_funds_are_kept(self):
+        items = [self._item("1", ["GGJ"]), self._item("2", ["DOH"])]
+        public = kap.limited_to(items, config.PUBLIC_KAP_CODES)
+        private = kap.limited_to(items, config.ALL_WATCHED)
+        self.assertEqual([i["id"] for i in public], ["2"])
+        self.assertEqual([i["id"] for i in private], ["1"])
+
+    def test_a_shared_announcement_never_names_a_watchlist_fund_publicly(self):
+        # A platform-wide announcement is collected from every fund page it
+        # appears on, so filtering alone would still print "PHE/GGJ" -- and GGJ
+        # is a holding the channel must never see.
+        items = [self._item("1", ["PHE", "GGJ"])]
+        public = kap.limited_to(items, config.PUBLIC_KAP_CODES)
+        self.assertEqual(public[0]["funds"], ["PHE"])
+        self.assertEqual(public[0]["code"], "PHE")
+        rendered = formatter.render(formatter._kap_block(public, public=True))
+        self.assertIn("PHE", rendered)
+        self.assertNotIn("GGJ", rendered)
+
+    def test_filtering_does_not_disturb_the_other_audience(self):
+        items = [self._item("1", ["PHE", "GGJ"])]
+        kap.limited_to(items, config.PUBLIC_KAP_CODES)
+        self.assertEqual(items[0]["funds"], ["PHE", "GGJ"])
+
+    def test_the_empty_notice_matches_the_audience(self):
+        self.assertIn(
+            "Takip listende", formatter.render(formatter._kap_block([]))
+        )
+        self.assertNotIn(
+            "Takip listende",
+            formatter.render(formatter._kap_block([], public=True)),
+        )
+
+
 class TestPublicReport(unittest.TestCase):
     def _records(self):
         records = [

@@ -29,7 +29,10 @@ repeats a best-returns table for its sub-segments:
   BEFAS gets no such section.
 * *Precious metals* — gold and silver funds pooled together, on both platforms.
 
-**KAP disclosures** — for watchlist funds only, covering yesterday and today.
+**KAP disclosures** — covering yesterday and today. The two audiences watch
+different funds: the owner's copy reports on the watchlists above, while the
+channel gets `TLY`, `TMV`, `DOH`, `DFI`, `THF`, `KHA`, `PHE` and `PBR` — the
+funds the commentary already names, rather than a personal portfolio.
 On a Monday the window reaches back to the previous Friday, so anything filed
 after Friday's report is not missed. Each entry carries the subject, a short
 summary and a link to any attached PDF.
@@ -105,7 +108,7 @@ registration and no API key.
 covers the ~310 pension funds. BEFAS needs no separate scraper.
 
 A full run touches ~1,360 funds and takes 6–8 minutes, plus roughly two minutes
-for the KAP pass over the thirteen watchlist funds.
+for the KAP pass over the seventeen funds in `config.KAP_CODES`.
 
 ### KAP
 
@@ -119,8 +122,8 @@ that bridges the two.
 
 Two things that will look like bugs but are not: the browser locale must be
 Turkish, or KAP bounces its own server actions to `/en/` and the table never
-fills; and each fund needs a fresh browser context, because driving thirteen
-navigations through one page wedges after the first.
+fills; and each fund needs a fresh browser context, because driving every
+navigation through one page wedges after the first.
 
 ### Things worth knowing about the upstream service
 

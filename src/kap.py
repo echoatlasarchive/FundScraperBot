@@ -313,6 +313,31 @@ def enrich(session: requests.Session, item: dict) -> dict:
 # -- entry point -------------------------------------------------------------
 
 
+def limited_to(items: Sequence[dict], codes: Sequence[str]) -> List[dict]:
+    """The disclosures concerning ``codes``, relabelled to name only those funds.
+
+    One KAP pass covers every fund on ``config.KAP_CODES``; each audience then
+    takes its own slice. Narrowing ``funds`` rather than only filtering on it
+    matters for the channel copy: a platform-wide announcement is collected from
+    every fund page it appears on, so an item can arrive tagged
+    ``["PHE", "GGJ"]`` and would otherwise print a watchlist code the channel is
+    never supposed to see.
+
+    Items are copied, so the caller's list is left alone for the other audience.
+    """
+    wanted = {c.upper() for c in codes}
+    out: List[dict] = []
+    for item in items:
+        funds = [f for f in (item.get("funds") or [item.get("code")]) if f in wanted]
+        if not funds:
+            continue
+        narrowed = dict(item)
+        narrowed["funds"] = funds
+        narrowed["code"] = funds[0]
+        out.append(narrowed)
+    return out
+
+
 def fetch_disclosures(
     funds: Sequence[Tuple[str, str]],
     today: Optional[date] = None,
@@ -349,7 +374,7 @@ def fetch_disclosures(
                 if not slug:
                     continue
 
-                # A fresh context per fund. Driving thirteen navigations through
+                # A fresh context per fund. Driving every navigation through
                 # one page wedges KAP: the first fund loads and every one after
                 # it times out, presumably because its bot-detection scripts
                 # accumulate state. Throwing the context away each time costs a

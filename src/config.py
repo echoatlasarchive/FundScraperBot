@@ -217,6 +217,23 @@ def within_delivery_window(moment) -> bool:
 # named set of funds as "mine" reads uncomfortably close to a recommendation.
 # The channel gets the rankings and the KAP disclosures, which is what it
 # promises its readers anyway.
+# KAP disclosures the channel gets. The owner's copy keeps reporting on
+# ALL_WATCHED, which is a personal portfolio and stays private (see below); the
+# channel needs funds its readers actually ask about, which is the same set the
+# "popular funds" post names. Both sets are scanned in one KAP pass and the
+# items are split by audience afterwards.
+#
+# TMV is here and is not TEFAS-traded. That is allowed and is why it sits in
+# EXTRA_FUND_CODES: reporting a disclosure about a fund the commentary names by
+# hand is not ranking, comparing or researching it. Nothing else untraded may
+# be added here.
+PUBLIC_KAP_CODES = ["TLY", "TMV", "DOH", "DFI", "THF", "KHA", "PHE", "PBR"]
+
+# Every fund whose KAP page is scanned: the owner's watchlists plus the channel's
+# set, in a stable order, without duplicates. One pass, one browser context per
+# fund, then split.
+KAP_CODES = ALL_WATCHED + [c for c in PUBLIC_KAP_CODES if c not in ALL_WATCHED]
+
 PUBLIC_DISCLAIMER = (
     "Burada yer alan veriler kamuya açık TEFAS, BEFAS ve KAP kaynaklarından "
     "derlenmiştir. Yatırım tavsiyesi değildir."

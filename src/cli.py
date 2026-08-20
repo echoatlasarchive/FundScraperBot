@@ -270,7 +270,7 @@ def run_daily(args) -> Optional[List[str]]:
     by_code = metrics.index_by_code(records)
     watched = [
         (code, by_code[code].get("name") or "")
-        for code in config.ALL_WATCHED
+        for code in config.KAP_CODES
         if code in by_code
     ]
     kap_items = kap.fetch_disclosures(watched, today=run_dt.date())
@@ -281,7 +281,6 @@ def run_daily(args) -> Optional[List[str]]:
         data_day=effective_day,
         run_day=run_dt.date(),
         baseline_day=baseline_day,
-        kap_items=kap_items,
         kap_note=kap_note,
     )
 
@@ -295,7 +294,13 @@ def run_daily(args) -> Optional[List[str]]:
             # report, so it is attempted first and its errors are swallowed.
             try:
                 telegram.send(
-                    formatter.daily_report(public=True, **common), chat_id=channel
+                    formatter.daily_report(
+                        public=True,
+                        # The channel's own set, not the owner's watchlists.
+                        kap_items=kap.limited_to(kap_items, config.PUBLIC_KAP_CODES),
+                        **common
+                    ),
+                    chat_id=channel,
                 )
                 _send_cards(cards, effective_day, channel)
             except Exception as exc:  # noqa: BLE001 - the private report matters more
@@ -316,7 +321,9 @@ def run_daily(args) -> Optional[List[str]]:
         except Exception as exc:  # noqa: BLE001
             log.warning("Could not send tweet drafts: %s", exc)
 
-    return formatter.daily_report(**common)
+    return formatter.daily_report(
+        kap_items=kap.limited_to(kap_items, config.ALL_WATCHED), **common
+    )
 
 
 def _build_cards(records: List[dict], day: date) -> List:

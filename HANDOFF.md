@@ -40,7 +40,7 @@ secret lives in the code.
 | Repo | https://github.com/echoatlasarchive/FundScraperBot |
 | Workflows | `daily.yml` (weekdays, hourly 05:20–09:20 UTC), `periodic.yml` (Mon + 1st) |
 | Secrets set | `TELEGRAM_TOKEN`, `TELEGRAM_CHAT_ID`, `TELEGRAM_CHANNEL_ID` |
-| Tests | 77, `python -m unittest discover -s tests` |
+| Tests | 83, `python -m unittest discover -s tests` |
 | Public channel | [@NeredeParaVar](https://t.me/NeredeParaVar), id `-1004445596324` |
 | Brand assets | `brand/`, regenerate with `python brand/build_brand.py` |
 | History | Building from scratch; see §4 |
@@ -332,7 +332,7 @@ narrower one to fit in ~40 characters on a phone.
 
 ## 8. KAP
 
-Implemented in `src/kap.py`, for watchlist funds only. Worth knowing before
+Implemented in `src/kap.py`, for the funds on `config.KAP_CODES`. Worth knowing before
 touching it, because most of this was found the hard way:
 
 * KAP's old public API is gone. `POST /tr/api/memberDisclosureQuery` still
@@ -347,7 +347,7 @@ touching it, because most of this was found the hard way:
 * **The browser locale must be Turkish.** With an English locale KAP 307s its
   own server action to `/en/<hash>`, which 404s, and the table never fills. This
   is why the first attempts looked like a dead end.
-* **One context per fund.** Reusing a single page across all thirteen funds
+* **One context per fund.** Reusing a single page across all seventeen funds
   wedges after the first: every later navigation times out.
 * Do not wait for `networkidle` — analytics and bot-detection beacons keep the
   network busy forever. Wait for the controls instead.
@@ -374,6 +374,32 @@ touching it, because most of this was found the hard way:
 * The filter repaint is flaky: a fund can render nothing for fifteen seconds and
   fifty rows on the next press. The button is pressed up to three times before
   an empty table is believed.
+
+### The two audiences watch different funds
+
+The owner's watchlists are a personal portfolio and stay private (§9), so
+reporting their KAP disclosures to the channel would leak exactly what the
+public report is careful not to print. The channel's KAP section therefore
+covers `config.PUBLIC_KAP_CODES` — `TLY TMV DOH DFI THF KHA PHE PBR`, the funds
+the "popular funds" post already names — while the owner's copy keeps reporting
+on `ALL_WATCHED`.
+
+Scraping is expensive (one browser context per fund, ~30s each), so there is
+still **one pass**, over the union in `config.KAP_CODES` (17 funds; the KAP
+stage grows from about 7 minutes to about 9), and `kap.limited_to()` splits the
+result afterwards.
+
+That split **narrows each item's `funds` list, it does not only filter on it**,
+and the difference is a leak. A platform-wide announcement is collected from
+every fund page it appears on, so one item can arrive tagged `["PHE", "GGJ"]`.
+Filtering alone keeps it — `PHE` is a channel fund — and then prints the header
+`PHE/GGJ`, putting a watchlist code into the public message. Narrowing prints
+`PHE`. `limited_to` copies each item so the other audience's list is untouched.
+
+`TMV` is on the channel list and is **not TEFAS-traded**, which is why it sits
+in `EXTRA_FUND_CODES`: reporting a disclosure about a fund the commentary names
+by hand is not ranking, comparing or researching it (§10). Nothing else untraded
+belongs on that list.
 
 ## 9. Brand and the public channel
 
