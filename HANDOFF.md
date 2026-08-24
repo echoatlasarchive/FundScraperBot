@@ -38,7 +38,7 @@ secret lives in the code.
 | | |
 |---|---|
 | Repo | https://github.com/echoatlasarchive/FundScraperBot |
-| Workflows | `daily.yml` (weekdays, 08:20 UTC), `periodic.yml` (Mon + 1st) |
+| Workflows | `daily.yml` (weekdays, 08:20 + 09:20 UTC), `periodic.yml` (Mon + 1st, 09:15 + 10:15 UTC) |
 | Secrets set | `TELEGRAM_TOKEN`, `TELEGRAM_CHAT_ID`, `TELEGRAM_CHANNEL_ID` |
 | Tests | 90, `python -m unittest discover -s tests` |
 | Public channel | [@NeredeParaVar](https://t.me/NeredeParaVar), id `-1004445596324` |
@@ -316,16 +316,34 @@ Two measurements settled it:
 * Of the five crons that day, GitHub fired **one** (07:20 UTC, nine minutes
   late). The redundancy the schedule was built for did not materialise anyway.
 
-So: `- cron: "20 8 * * 1-5"`, 11:20 Istanbul, one attempt. The fetch starts
-after TEFAS is done, and the report still lands around 11:50, comfortably
-before the 13:30 cutoff. Starting late enough that the data is there is a
-simpler guarantee than starting early and testing whether it is.
+So the fetch starts after TEFAS is done. Starting late enough that the data is
+there is a simpler guarantee than starting early and testing whether it is.
 
-**What this costs, and it is real:** there is no second chance. If GitHub skips
-the cron, or TEFAS is unusually late, there is no report that day. So a run that
-declines to report now sends a **Telegram alert** to the owner rather than
-exiting quietly — "a later run will pick it up" stopped being true — and
-`daily.yml` can be dispatched by hand once the platform has finished.
+**The hour and the count are set by different things.** The hour is TEFAS. The
+count is GitHub, which does not merely delay scheduled runs — it skips them:
+
+| | |
+|---|---|
+| 2026-08-20 | five crons scheduled, **one** fired (nine minutes late) |
+| 2026-08-21 | fired **100 minutes** late |
+| 2026-08-24 | **not fired at all** — and `periodic.yml` was skipped the same day, so it was the scheduler, not either file |
+
+A single attempt was tried for exactly one working week and failed on the first
+Monday. Worse, it failed **silently**: the "session incomplete" alert only fires
+from a run that starts, and a run that never starts cannot say anything. The
+owner noticed at 13:00 that no message had arrived.
+
+So: `- cron: "20 8,9 * * 1-5"`, 11:20 and 12:20 Istanbul. Two attempts, **both
+after TEFAS is done**, which is what keeps this from being the old hourly
+schedule wearing a hat — no attempt ever fetches early. The second costs nothing
+when the first succeeded: `session_is_published()` probes five funds against the
+newest snapshot and exits in seconds. Both still land before the 13:30 cutoff.
+
+`periodic.yml` gets the same treatment for the same reason: it had one chance in
+its first week and was skipped, so no weekly report had ever gone out.
+
+Do not add a third attempt at 10:20 UTC: 13:20 Istanbul plus a ~30 minute run
+finishes after the order cutoff the report exists to beat.
 
 `--only-if-new` stays. It is not a retry, it is the gate that stops a holiday or
 an unfinished session being reported, and it is what raises that alert.

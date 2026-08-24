@@ -188,9 +188,9 @@ The daily workflow needs write access to commit snapshots: **Settings → Action
 
 ### 3. Schedule
 
-`daily.yml` fires once on weekdays, at **08:20 UTC — 11:20 Istanbul**, and the
-attempt exits within seconds unless TEFAS has published a session that is not
-already stored.
+`daily.yml` fires twice on weekdays, at **08:20 and 09:20 UTC — 11:20 and 12:20
+Istanbul** — and each attempt exits within seconds unless TEFAS has published a
+session that is not already stored.
 
 The hour is set by when TEFAS finishes, not by when the report would ideally
 land. An earlier schedule fired hourly from 05:20 UTC to absorb GitHub's queue
@@ -198,17 +198,17 @@ delay, but firing early only helps if the data is there: a run that fetched at
 10:29 Istanbul found eighteen funds still unpriced and reported one of them at
 −100%. TEFAS does not omit a fund it has not valued — it returns the row with
 price, assets and units all zero — so an early attempt is not a free retry, it
-is another chance to publish a wrong report. Starting after the platform is
-done is the simpler guarantee, and 11:20 still leaves the report well clear of
-the 13:30 fund-order cutoff.
+is another chance to publish a wrong report.
 
-The cost is that there is no second chance: if GitHub skips the cron, or TEFAS
-is unusually late, there is no report that day. A run that declines to report
-sends a Telegram alert to the owner rather than exiting quietly, so it can be
-dispatched by hand.
+The count is set by GitHub, which skips scheduled runs outright: of five crons
+on 2026-08-20 one fired, 2026-08-21 fired 100 minutes late, and 2026-08-24 did
+not fire at all. A single attempt means no report at all on a skipped day, and
+silently — the bot cannot warn about a run that never starts. So there are two,
+both after the platform is done, and the second is free when the first worked.
 
-`periodic.yml` runs weekly on Monday and monthly on the 1st, and reads the
-snapshots the daily job committed rather than fetching anything itself.
+`periodic.yml` runs weekly on Monday and monthly on the 1st — twice each, for
+the same reason — and reads the snapshots the daily job committed rather than
+fetching anything itself.
 
 Separately from the schedule, a report is only ever **delivered** between 07:00
 and 14:00 Istanbul. The schedule decides when the bot runs; the window decides
