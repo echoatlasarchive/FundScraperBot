@@ -201,14 +201,30 @@ def session_is_complete(records: List[dict]) -> bool:
     # unpriced, and the report printed PHE at -100%. Even one is disqualifying:
     # the session is still being published.
     late = storage.unvalued_funds(records, previous)
+    # Whether an unpriced fund is worth holding the report for depends on
+    # whether it would have been printed. On 2026-08-25 exactly one fund was
+    # late -- PSH, 16.6M TRY and 354 investors, below both ranking thresholds
+    # and on no list -- and the run refused to report anything at all. Nobody
+    # would have seen PSH either way. Eligibility is read off the *baseline*
+    # row, because the placeholder has zero assets and fails the size filter by
+    # construction.
+    blocking = [c for c in late if metrics.is_reportable(previous.get(c) or {"code": c})]
     if late:
         log.info(
-            "Session incomplete: %d fund(s) not priced yet (%s%s).",
+            "%d fund(s) not priced yet: %s%s",
             len(late),
             ", ".join(sorted(late)[:12]),
             ", ..." if len(late) > 12 else "",
         )
+    if blocking:
+        log.info(
+            "Session incomplete: %d of them would be reported (%s).",
+            len(blocking),
+            ", ".join(sorted(blocking)[:12]),
+        )
         return False
+    if late:
+        log.info("None of them reach a table; their figures are blanked instead.")
 
     fraction = storage.published_fraction(records, previous)
     if fraction is None:
@@ -484,6 +500,18 @@ def main(argv=None) -> int:
             "Printing the report instead of sending it; pass --force to override.",
             now.strftime("%H:%M"), start, end,
         )
+        # Say so out loud. Suppressing quietly is how the weekly report went
+        # missing on 2026-08-24: GitHub fired it 91 minutes late, it landed at
+        # 14:47, and the window swallowed it without a word.
+        try:
+            telegram.send_alert(
+                "Saat {} (İstanbul), teslim penceresi {:02d}:00-{:02d}:00 dışında. "
+                "'{}' raporu üretildi ama gönderilmedi.".format(
+                    now.strftime("%H:%M"), start, end, args.command
+                )
+            )
+        except Exception:  # noqa: BLE001 - alerting must not break the run
+            pass
         args.dry_run = True
 
     try:

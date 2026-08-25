@@ -202,7 +202,15 @@ TWEET_SUFFIX = "ytd"
 # delivery outside 07:00-14:00 is by definition not the delivery the schedule
 # intended. Out of the window the run still fetches, stores and prints; it just
 # sends nothing, unless --force says otherwise.
-DELIVERY_WINDOW_ISTANBUL = (7, 14)
+# Widened from 07:00-14:00 on 2026-08-25. The narrow window was set by the 13:30
+# fund-order cutoff, which is about how *useful* a late report is -- but GitHub
+# fires scheduled runs 40 to 100 minutes late, and on 2026-08-24 it fired the
+# weekly report at 14:47 Istanbul, where the window silently swallowed it. That
+# turned "late" into "nothing", which is worse than late. The window's actual
+# job is narrower than the cutoff: stop an off-schedule run -- a manual dispatch
+# made while testing, a re-run -- putting a report into the public channel in
+# the middle of the night. 20:00 does that and survives any plausible delay.
+DELIVERY_WINDOW_ISTANBUL = (7, 20)
 
 
 def within_delivery_window(moment) -> bool:
@@ -239,6 +247,19 @@ PUBLIC_DISCLAIMER = (
     "derlenmiştir. Yatırım tavsiyesi değildir."
 )
 
+
+# Every fund a report can name whatever the ranking thresholds say: the two
+# watchlists, the KAP sets, the untraded codes the commentary names, the crypto
+# funds and the popular-fund groups. Used to decide whether a fund TEFAS has not
+# priced yet is worth holding the whole report for -- see metrics.is_reportable.
+NAMED_FUNDS = frozenset(
+    ALL_WATCHED
+    + KAP_CODES
+    + PUBLIC_KAP_CODES
+    + EXTRA_FUND_CODES
+    + list(CRYPTO_HOLDINGS)
+    + [code for _, codes in POPULAR_GROUPS for code in codes]
+)
 
 # --- Runtime secrets -------------------------------------------------------
 

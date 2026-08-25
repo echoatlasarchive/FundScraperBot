@@ -211,12 +211,16 @@ the same reason — and reads the snapshots the daily job committed rather than
 fetching anything itself.
 
 Separately from the schedule, a report is only ever **delivered** between 07:00
-and 14:00 Istanbul. The schedule decides when the bot runs; the window decides
+and 20:00 Istanbul. The schedule decides when the bot runs; the window decides
 whether it may send. Without it, anything that fires the workflow off-schedule —
 a manual dispatch made while testing, a re-run — posts to the public channel at
 whatever hour that happens to be, which is how a report once went out at 02:17
 in the morning. Outside the window a run still fetches, stores and prints, and
-sends nothing; `--force` (or the workflow's `force` input) overrides.
+sends nothing, and says so with a Telegram alert; `--force` (or the workflow's
+`force` input) overrides. The bound is deliberately loose: it exists to stop an
+off-schedule run posting at 2am, not to enforce the 13:30 order cutoff, and a
+tighter 14:00 edge once swallowed a weekly report that GitHub had fired 91
+minutes late.
 
 ## Running locally
 

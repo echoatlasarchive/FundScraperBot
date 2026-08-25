@@ -129,6 +129,32 @@ def plausible_period_return(value) -> bool:
     return ret is not None and abs(ret) <= config.MAX_ABS_PERIOD_RETURN_PCT
 
 
+def is_reportable(record: dict) -> bool:
+    """Could this fund appear in a report at all?
+
+    The rankings are the usual answer, but not the only one: the watchlists, the
+    KAP sets, the crypto funds and the funds the commentary names are printed
+    whatever their size, and `TMV` is printed although TEFAS does not trade it.
+
+    This exists to size a failure. When TEFAS has not priced a fund yet the run
+    has to decide between reporting figures it cannot trust and reporting
+    nothing, and the answer turns on whether that fund would have been printed.
+    On 2026-08-25 it was `PSH` -- 16.6M TRY and 354 investors, below both
+    thresholds and on no list -- and holding the entire day's report for a fund
+    that appears nowhere in it was the wrong trade.
+
+    Judge this on the **baseline** row, not on the placeholder: an unpriced
+    record has zero assets and so fails the size filter by construction.
+    """
+    if (record.get("code") or "").upper() in config.NAMED_FUNDS:
+        return True
+    return (
+        is_tefas_traded(record)
+        and passes_size_filter(record)
+        and passes_investor_filter(record)
+    )
+
+
 def eligible_universe(records: List[dict]) -> List[dict]:
     """Funds that may appear in a ranking: TEFAS-traded, large, widely held.
 

@@ -40,7 +40,7 @@ secret lives in the code.
 | Repo | https://github.com/echoatlasarchive/FundScraperBot |
 | Workflows | `daily.yml` (weekdays, 08:20 + 09:20 UTC), `periodic.yml` (Mon + 1st, 09:15 + 10:15 UTC) |
 | Secrets set | `TELEGRAM_TOKEN`, `TELEGRAM_CHAT_ID`, `TELEGRAM_CHANNEL_ID` |
-| Tests | 90, `python -m unittest discover -s tests` |
+| Tests | 93, `python -m unittest discover -s tests` |
 | Public channel | [@NeredeParaVar](https://t.me/NeredeParaVar), id `-1004445596324` |
 | Brand assets | `brand/`, regenerate with `python brand/build_brand.py` |
 | History | Building from scratch; see §4 |
@@ -161,7 +161,7 @@ Every guard missed it, each for its own reason:
 
 Two fixes, at different depths:
 
-* `storage.unvalued_funds()` is the gate. **The tell is a zero, not an absence,
+* `storage.unvalued_funds()` finds them. **The tell is a zero, not an absence,
   and a transition, not a standing state.** A per-fund request that times out
   leaves the row with *no* price rather than a zero — one did the same day,
   `AIS`, out of 1,370 — and counting that as an unfinished session would hold
@@ -174,6 +174,22 @@ Two fixes, at different depths:
   block every run for ever. A fund that had a real price in the baseline and has
   none now is a fund still being valued. Even one is disqualifying: nothing is
   reported and nothing is stored.
+* `metrics.is_reportable()` decides whether being late matters. Refusing to
+  report while **any** fund is unpriced was too strict and cost a day: on
+  2026-08-25 exactly one fund was late — `PSH`, 16.6M TRY and 354 investors,
+  below both ranking thresholds and on no list — and the run reported nothing.
+  `PSH` appears in no table, no card and no tweet; nobody would have seen it
+  either way. The question is not "is the session complete" but **"is the data I
+  am about to print complete"**, so only a fund that would have been printed
+  blocks: one over both thresholds, or one named in `config.NAMED_FUNDS` (the
+  watchlists, the KAP sets, the crypto funds, the commentary's funds, `TMV`).
+  Judge it on the **baseline** row — a placeholder has zero assets and fails the
+  size filter by construction, so judging it on its own row would make every
+  late fund look harmless and the gate would never fire at all.
+
+  Checked against both incidents: 2026-08-20 flags 14, of which 8 are
+  reportable including `PHE` → blocks, correctly. 2026-08-25 flags `PSH` alone,
+  0 reportable → proceeds, correctly.
 * `metrics.is_valued()` is the backstop, applied in `attach_deltas()`, which
   every path runs through. An unvalued record's `daily_return`, `flow` and
   `aum_change` are blanked so they render as `—`. This matters because a
@@ -350,6 +366,8 @@ an unfinished session being reported, and it is what raises that alert.
 
 ### The delivery window — what the schedule cannot protect
 
+*(Widened to 07:00–20:00 on 2026-08-25; see the end of this section.)*
+
 Everything above governs when the workflow *runs*. Nothing in it governs when
 the bot *sends*, and those came apart on 2026-08-20: a `workflow_dispatch` fired
 at 01:46 Istanbul to test a code change, ran the full send path because
@@ -376,6 +394,20 @@ A plain manual dispatch is therefore safe at any hour: it prints the report into
 the Actions log and sends nothing. **Do not "restore" the old behaviour where a
 dispatch always reports** — that convenience is exactly what published a report
 at 2am.
+
+**The bounds were wrong, though, and were widened to 07:00–20:00.** 14:00 came
+from the 13:30 order cutoff, which is a statement about how *useful* a late
+report is — not about whether it should exist. GitHub fires these runs 40 to 100
+minutes late, and on 2026-08-24 it fired `periodic.yml` at 14:47 Istanbul: the
+window turned a late weekly report into no weekly report, silently, and the
+owner only found out by asking. Late beats nothing. The window's real job is
+narrower than the cutoff — stop an off-schedule run posting to the channel in
+the middle of the night — and 20:00 does that while surviving any plausible
+delay on a 12:20 cron.
+
+Suppression is also no longer silent: when the window blocks a send the run
+raises a Telegram alert saying so. That is the whole reason the weekly failure
+went unnoticed for a day.
 
 ## 7. Report format (`src/formatter.py`)
 

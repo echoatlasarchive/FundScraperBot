@@ -815,14 +815,21 @@ class TestDeliveryWindow(unittest.TestCase):
             self.assertTrue(config.within_delivery_window(self._at(hour)), hour)
 
     def test_the_small_hours_are_outside(self):
-        for hour in (0, 2, 3, 5, 6, 14, 20, 23):
+        for hour in (0, 2, 3, 5, 6, 20, 22, 23):
             self.assertFalse(config.within_delivery_window(self._at(hour)), hour)
 
-    def test_window_closes_before_the_order_cutoff_day_ends(self):
-        # The report is useless after the 13:30 fund-order cutoff, so the window
-        # must not stretch into the afternoon.
-        _, end = config.DELIVERY_WINDOW_ISTANBUL
-        self.assertLessEqual(end, 14)
+    def test_a_badly_delayed_scheduled_run_can_still_deliver(self):
+        # GitHub fires these runs 40 to 100 minutes late, and on 2026-08-24 it
+        # fired the weekly report at 14:47, where the old 14:00 edge swallowed
+        # it silently. The last cron is 12:20 Istanbul, so the window has to
+        # clear that plus any plausible delay -- late beats nothing.
+        for hour in (13, 14, 15, 16, 18):
+            self.assertTrue(config.within_delivery_window(self._at(hour)), hour)
+
+    def test_the_window_still_covers_the_night(self):
+        # Its actual job: an off-schedule run must not post to the channel at
+        # 02:17 in the morning, which is what it was added for.
+        self.assertFalse(config.within_delivery_window(self._at(2)))
 
 
 class TestPublicationCompleteness(unittest.TestCase):
@@ -897,6 +904,24 @@ class TestUnvaluedFunds(unittest.TestCase):
         # It still must not be printed, though.
         [out] = metrics.attach_deltas([missing], previous)
         self.assertIsNone(out["daily_return"])
+
+    def test_only_a_fund_that_would_be_printed_blocks_the_report(self):
+        # PSH: 16.6M TRY, 354 investors, on no list. It appears in no table, no
+        # card and no tweet, and on 2026-08-25 it stopped the whole report.
+        psh = make_record("PSH", aum=16_572_454.0, investors=354)
+        self.assertFalse(metrics.is_reportable(psh))
+        # PHE is a watchlist fund, so it blocks however small it looks.
+        self.assertTrue(metrics.is_reportable(make_record("PHE", aum=1.0, investors=1)))
+        # TMV is named by the commentary and is not TEFAS-traded.
+        self.assertTrue(metrics.is_reportable(make_record("TMV", tefas_traded=0)))
+        # An ordinary fund over both thresholds blocks too.
+        self.assertTrue(metrics.is_reportable(make_record("BIG")))
+
+    def test_reportability_is_judged_on_the_baseline_row(self):
+        # The placeholder has zero assets, so judging it on its own row would
+        # make every late fund look unreportable and the gate would never fire.
+        self.assertFalse(metrics.is_reportable(self._placeholder("BIG")))
+        self.assertTrue(metrics.is_reportable(make_record("BIG")))
 
     def test_a_normal_session_flags_nothing(self):
         previous = {"OK": make_record("OK", price=2.0)}
