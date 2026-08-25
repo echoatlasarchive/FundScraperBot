@@ -491,6 +491,58 @@ class TestKapWindow(unittest.TestCase):
         self.assertTrue(kap._page_is_for("TLY" + "x" * 80_000, "TLY"))
 
 
+class TestKapSlugResolution(unittest.TestCase):
+    """A dropped connection is not an answer about whether a slug is right."""
+
+    class _Response:
+        def __init__(self, text):
+            self.status_code = 200
+            self.text = text
+
+    def _page(self, code):
+        return "x" * 80_000 + code.upper()
+
+    def test_a_transport_error_is_retried_before_the_next_candidate(self):
+        import requests
+
+        calls = []
+
+        class Session:
+            def get(_, url, timeout=None):
+                calls.append(url)
+                if len(calls) == 1:
+                    raise requests.RequestException("Connection aborted.")
+                return TestKapSlugResolution._Response(self._page("TAU"))
+
+        cache = {}
+        slug = kap.resolve_slug(
+            Session(), "TAU", "İŞ PORTFÖY BIST BANKA ENDEKSİ HİSSE SENEDİ (TL) FONU", cache
+        )
+        # The first candidate is retried and wins, rather than the run falling
+        # through to the stripped form, which is usually the wrong page.
+        self.assertIsNotNone(slug)
+        self.assertIn("tl-fonu", slug)
+        self.assertEqual(cache["TAU"], slug)
+        self.assertEqual(calls[0], calls[1])
+
+    def test_a_served_page_for_another_fund_moves_on_immediately(self):
+        calls = []
+
+        class Session:
+            def get(_, url, timeout=None):
+                calls.append(url)
+                if len(calls) == 1:
+                    return TestKapSlugResolution._Response("shell" * 100)
+                return TestKapSlugResolution._Response(self._page("PHE"))
+
+        slug = kap.resolve_slug(
+            Session(), "PHE", "PUSULA PORTFÖY HİSSE SENEDİ FONU (HİSSE SENEDİ YOĞUN FON)", {}
+        )
+        self.assertIsNotNone(slug)
+        # Two requests, not six: a shell page is a real answer.
+        self.assertEqual(len(calls), 2)
+
+
 class TestKapRendering(unittest.TestCase):
     def test_disclosure_with_attachment_renders_summary_and_link(self):
         items = [{

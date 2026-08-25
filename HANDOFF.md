@@ -40,7 +40,7 @@ secret lives in the code.
 | Repo | https://github.com/echoatlasarchive/FundScraperBot |
 | Workflows | `daily.yml` (weekdays, 08:20 UTC), `periodic.yml` (Mon + 1st, 09:15 + 10:15 UTC) |
 | Secrets set | `TELEGRAM_TOKEN`, `TELEGRAM_CHAT_ID`, `TELEGRAM_CHANNEL_ID` |
-| Tests | 97, `python -m unittest discover -s tests` |
+| Tests | 99, `python -m unittest discover -s tests` |
 | Public channel | [@NeredeParaVar](https://t.me/NeredeParaVar), id `-1004445596324` |
 | Brand assets | `brand/`, regenerate with `python brand/build_brand.py` |
 | History | Building from scratch; see §4 |
@@ -510,6 +510,14 @@ touching it, because most of this was found the hard way:
 * Individual disclosures at `/tr/Bildirim/<id>` *are* server-rendered and can be
   fetched with plain `requests`. The bridge from list to detail is the row
   checkbox's `id` attribute, which is the disclosure id.
+* **Retry the slug probe, do not fall through to the next candidate.** The
+  candidates are tried in likelihood order and the second form is usually the
+  wrong page, so treating a dropped connection as "this slug is wrong" loses the
+  fund entirely. `TAU` was dropped from its first scan that way on 2026-08-25 —
+  one `RemoteDisconnected`, then the stripped form answered with the 69 KB
+  shell, and the run reported the fund as unresolvable although its real page
+  was there. `SLUG_ATTEMPTS` is 3, with backoff; a *served* page that is not the
+  fund still moves on immediately, since that is a real answer.
 * Slugs are `code-slugified-full-name`, parenthetical included. Validate a
   candidate by the **fund code**, never the name: TEFAS writes "ZURICH" with a
   Latin I where KAP writes "ZURİCH" with a dotted one. An unknown slug still

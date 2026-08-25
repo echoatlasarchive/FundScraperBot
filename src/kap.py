@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 from datetime import date, datetime, timedelta
 from typing import Dict, List, Optional, Sequence, Tuple
 
@@ -39,6 +40,11 @@ try:  # Playwright is only needed for the list page.
     from playwright.sync_api import sync_playwright
 except ImportError:  # pragma: no cover - depends on the environment
     sync_playwright = None
+
+
+# A dropped connection is not an answer about the slug, so each candidate is
+# probed more than once before the next form is tried.
+SLUG_ATTEMPTS = 3
 
 
 class _EmptyTable(Exception):
@@ -109,14 +115,29 @@ def resolve_slug(
         return cached
 
     for candidate in _candidate_slugs(code, name):
-        try:
-            resp = session.get(FUND_PAGE.format(slug=candidate), timeout=60)
-        except requests.RequestException as exc:
-            log.warning("KAP slug probe failed for %s: %s", code, exc)
-            continue
-        if resp.status_code == 200 and _page_is_for(resp.text, code):
-            cache[code] = candidate
-            return candidate
+        # Retry the transport, not just the next candidate. A dropped
+        # connection says nothing about whether the slug is right, and the
+        # candidates are tried in order of likelihood -- so giving up on the
+        # first one after a network blip means falling through to a form that
+        # is usually wrong, and then reporting the fund as unresolvable. That
+        # is what happened to TAU on 2026-08-25, its first day on the
+        # watchlist: one RemoteDisconnected and it was dropped from the scan,
+        # although its page is there and answers with the full 90 KB.
+        for attempt in range(1, SLUG_ATTEMPTS + 1):
+            try:
+                resp = session.get(FUND_PAGE.format(slug=candidate), timeout=60)
+            except requests.RequestException as exc:
+                log.warning(
+                    "KAP slug probe failed for %s (attempt %d/%d): %s",
+                    code, attempt, SLUG_ATTEMPTS, exc,
+                )
+                if attempt < SLUG_ATTEMPTS:
+                    time.sleep(2 * attempt)
+                continue
+            if resp.status_code == 200 and _page_is_for(resp.text, code):
+                cache[code] = candidate
+                return candidate
+            break  # a served page that is not this fund: try the next form
 
     log.warning("Could not resolve a KAP page for %s (%s).", code, name)
     return None
