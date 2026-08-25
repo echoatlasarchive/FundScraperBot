@@ -38,15 +38,15 @@ secret lives in the code.
 | | |
 |---|---|
 | Repo | https://github.com/echoatlasarchive/FundScraperBot |
-| Workflows | `daily.yml` (weekdays, 08:20 + 09:20 UTC), `periodic.yml` (Mon + 1st, 09:15 + 10:15 UTC) |
+| Workflows | `daily.yml` (weekdays, 08:20 UTC), `periodic.yml` (Mon + 1st, 09:15 + 10:15 UTC) |
 | Secrets set | `TELEGRAM_TOKEN`, `TELEGRAM_CHAT_ID`, `TELEGRAM_CHANNEL_ID` |
-| Tests | 93, `python -m unittest discover -s tests` |
+| Tests | 97, `python -m unittest discover -s tests` |
 | Public channel | [@NeredeParaVar](https://t.me/NeredeParaVar), id `-1004445596324` |
 | Brand assets | `brand/`, regenerate with `python brand/build_brand.py` |
 | History | Building from scratch; see §4 |
 
-**Watchlists** (`src/config.py`): TEFAS `PHE TLY KHA THF` · money market
-`TP2 PRY PNU` · BEFAS `GGJ TVH GCN FFC NHN BZY`.
+**Watchlists** (`src/config.py`): TEFAS `TLY THF DOH DMG PHE KHA TAU` · money
+market `TP2 PRY PNU` · BEFAS `GGJ TVH GCN`. KAP scans these plus `TMV`.
 
 **Ranking filters**: AUM ≥ 100M TRY **and** ≥ 5,000 investors. The investor
 threshold is the important one — see §5.
@@ -315,7 +315,34 @@ confirms this data is the session after the newest stored one, that is what it
 is — and falls back to `data_date_for()` only on a first run or after a gap the
 chain cannot bridge.
 
-### Superseded on 2026-08-20 — it is now one cron at 08:20 UTC
+### Where this ended up
+
+**One cron, `20 8 * * 1-5`, and it reports whatever it finds.** Both are the
+owner's decision, each stated twice, and the reasoning below is kept because it
+explains what the trade-offs were rather than what they should be.
+
+The hour is not negotiable and is the one thing every version has agreed on:
+**nothing may fetch before TEFAS has finished, about 11:00 Istanbul.** That is
+what caused the -100% report (§4a) and it is the constraint the whole schedule
+exists around.
+
+The count and the gates were tried both ways within a week, and both directions
+failed in their own way:
+
+* *Many early attempts* (05:20–09:20 UTC hourly) — every extra attempt fetched
+  before the data existed, so it was not a free retry but another chance to
+  publish a wrong report.
+* *Two late attempts + hard gates* — GitHub still skipped the 11:20 slot, and
+  the gates turned every delay into silence: 2026-08-24 no daily report and no
+  weekly report, 2026-08-25 a whole report discarded over `PSH`.
+
+So the gates now measure and report rather than withhold (`cli.report_gaps`),
+and there is one attempt. **A skipped cron therefore means no report that day
+and nothing will say so** — the run cannot warn about its own failure to start.
+That is understood and accepted; dispatch `daily.yml` by hand when a morning
+passes without a message.
+
+### Historical: the hourly schedule, superseded 2026-08-20
 
 Everything above is still true about GitHub's queue, and it was still the wrong
 thing to optimise for. Firing early only helps if the data is there, and it is

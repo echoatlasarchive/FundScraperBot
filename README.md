@@ -16,9 +16,9 @@ market share for each of:
 
 | Group | Funds |
 |---|---|
-| TEFAS | `PHE`, `TLY`, `KHA`, `THF` |
+| TEFAS | `TLY`, `THF`, `DOH`, `DMG`, `PHE`, `KHA`, `TAU` |
 | Money market | `TP2`, `PRY`, `PNU` |
-| BEFAS (pension) | `GGJ`, `TVH`, `GCN`, `FFC`, `NHN`, `BZY` |
+| BEFAS (pension) | `GGJ`, `TVH`, `GCN` |
 
 **Rankings** — TEFAS and BEFAS are reported under separate headings, each
 showing the best returns, the largest inflows and outflows, and the biggest
@@ -31,8 +31,8 @@ repeats a best-returns table for its sub-segments:
 
 **KAP disclosures** — covering yesterday and today. The two audiences watch
 different funds: the owner's copy reports on the watchlists above, while the
-channel gets `TLY`, `TMV`, `DOH`, `DFI`, `THF`, `KHA`, `PHE` and `PBR` — the
-funds the commentary already names, rather than a personal portfolio.
+channel gets `TLY`, `THF`, `DOH`, `TMV`, `PHE` and `KHA` — the funds the
+commentary already names, rather than a personal portfolio.
 On a Monday the window reaches back to the previous Friday, so anything filed
 after Friday's report is not missed. Each entry carries the subject, a short
 summary and a link to any attached PDF.
@@ -188,23 +188,20 @@ The daily workflow needs write access to commit snapshots: **Settings → Action
 
 ### 3. Schedule
 
-`daily.yml` fires twice on weekdays, at **08:20 and 09:20 UTC — 11:20 and 12:20
-Istanbul** — and each attempt exits within seconds unless TEFAS has published a
-session that is not already stored.
+`daily.yml` fires once on weekdays, at **08:20 UTC — 11:20 Istanbul**, and
+reports whatever it finds.
 
 The hour is set by when TEFAS finishes, not by when the report would ideally
-land. An earlier schedule fired hourly from 05:20 UTC to absorb GitHub's queue
-delay, but firing early only helps if the data is there: a run that fetched at
-10:29 Istanbul found eighteen funds still unpriced and reported one of them at
-−100%. TEFAS does not omit a fund it has not valued — it returns the row with
-price, assets and units all zero — so an early attempt is not a free retry, it
-is another chance to publish a wrong report.
+land. TEFAS does not omit a fund it has not valued — it returns the row with
+price, assets and units all zero — so fetching early is not a free retry, it is
+a chance to publish a wrong report. A fund that is still unpriced when the run
+fetches has its figures blanked rather than invented, prints as a dash, and is
+named in a Telegram alert to the owner.
 
-The count is set by GitHub, which skips scheduled runs outright: of five crons
-on 2026-08-20 one fired, 2026-08-21 fired 100 minutes late, and 2026-08-24 did
-not fire at all. A single attempt means no report at all on a skipped day, and
-silently — the bot cannot warn about a run that never starts. So there are two,
-both after the platform is done, and the second is free when the first worked.
+GitHub skips and delays scheduled runs (40 to 100 minutes late, and outright
+skipped on 2026-08-24). With a single attempt that means no report on a skipped
+day, and nothing announces it — a run that never starts cannot warn about
+itself. Dispatch the workflow by hand when a morning passes without a message.
 
 `periodic.yml` runs weekly on Monday and monthly on the 1st — twice each, for
 the same reason — and reads the snapshots the daily job committed rather than

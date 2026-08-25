@@ -2,30 +2,21 @@ name: Daily report
 
 on:
   schedule:
-    # 08:20 and 09:20 UTC == 11:20 and 12:20 Istanbul, weekdays.
+    # 08:20 UTC == 11:20 Istanbul, once, on weekdays. Owner's decision, twice
+    # stated: one attempt, and it reports whatever it finds.
     #
-    # The *hour* is set by when TEFAS finishes, not by when we would like the
-    # report. Measured 2026-08-20: a run that fetched at 10:29 Istanbul found
-    # eighteen funds still unpriced, PHE among them, and the owner -- watching
-    # the platform that morning -- puts the point at which most funds are
-    # settled at about 11:00. Nothing may fetch before that. An earlier
-    # schedule ran hourly from 05:20 UTC and every extra attempt was not a free
-    # retry but another chance to publish a wrong report; see HANDOFF 4a.
+    # The hour is set by when TEFAS finishes. Measured 2026-08-20: a run that
+    # fetched at 10:29 Istanbul found eighteen funds still unpriced, and the
+    # owner puts the point at which most funds are settled at about 11:00.
+    # Nothing may fetch before that -- see HANDOFF 4a.
     #
-    # The *count* is set by GitHub, which skips scheduled runs outright:
-    #   2026-08-20  five crons scheduled, one fired (nine minutes late)
-    #   2026-08-21  fired 100 minutes late
-    #   2026-08-24  not fired at all -- and periodic.yml was skipped the same
-    #               day, so it was the scheduler, not this file
-    # A single attempt therefore means no report on a skipped day, silently:
-    # the "session incomplete" alert only fires from a run that starts, and a
-    # run that never starts cannot say anything.
-    #
-    # So: two attempts, both *after* TEFAS is done. The second costs nothing
-    # when the first succeeded -- the probe in cli.session_is_published() finds
-    # no new session and exits in seconds -- and both still land the report
-    # before the 13:30 fund-order cutoff.
-    - cron: "20 8,9 * * 1-5"
+    # GitHub fires these 40 to 100 minutes late and sometimes not at all
+    # (2026-08-24 and the 11:20 slot on 2026-08-25 were both skipped). A second
+    # attempt was tried for a day and removed again on request. So a skipped
+    # cron means no report that day, and the only signal is its absence: the
+    # run cannot warn about itself failing to start. Dispatch by hand when that
+    # happens.
+    - cron: "20 8 * * 1-5"
   workflow_dispatch:
     inputs:
       dry_run:
@@ -34,6 +25,10 @@ on:
         default: false
       force:
         description: "Send even outside the delivery window, and even if the session was already reported"
+        type: boolean
+        default: false
+      resend:
+        description: "Re-send the stored session to the owner only, fetching nothing from TEFAS"
         type: boolean
         default: false
 
@@ -88,7 +83,7 @@ jobs:
           # still prints the report into this log.
           python -m src.cli daily \
             ${{ inputs.dry_run && '--dry-run' || '' }} \
-            ${{ inputs.force && '--force' || '--only-if-new' }}
+            ${{ inputs.resend && '--no-fetch --owner-only --force' || (inputs.force && '--force' || '--only-if-new') }}
 
       - name: Commit the snapshot
         run: |

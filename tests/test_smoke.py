@@ -529,22 +529,42 @@ class TestKapAudiences(unittest.TestCase):
         }
 
     def test_channel_set_is_the_funds_the_commentary_names(self):
+        # The channel sees the funds the posts already name out loud, not the
+        # owner's watchlist -- that is the whole point of the split.
         self.assertEqual(
-            config.PUBLIC_KAP_CODES,
-            ["TLY", "TMV", "DOH", "DFI", "THF", "KHA", "PHE", "PBR"],
+            config.PUBLIC_KAP_CODES, ["TLY", "THF", "DOH", "TMV", "PHE", "KHA"]
         )
+        for code in config.TERA_GROUP:
+            self.assertIn(code, config.PUBLIC_KAP_CODES, code)
+
+    def test_the_channel_does_not_see_the_whole_watchlist(self):
+        # Publishing every watched fund would expose the portfolio by
+        # enumeration, which is what the public report avoids everywhere else.
+        private_only = set(config.ALL_WATCHED) - set(config.PUBLIC_KAP_CODES)
+        self.assertTrue(private_only)
 
     def test_one_pass_covers_both_audiences_without_duplicates(self):
         self.assertEqual(len(config.KAP_CODES), len(set(config.KAP_CODES)))
         for code in config.ALL_WATCHED + config.PUBLIC_KAP_CODES:
             self.assertIn(code, config.KAP_CODES)
 
-    def test_only_the_audience_own_funds_are_kept(self):
-        items = [self._item("1", ["GGJ"]), self._item("2", ["DOH"])]
+    def test_each_audience_keeps_only_its_own_funds(self):
+        # GGJ is watched but never published; TMV is published but not a
+        # holding; DOH is on both lists.
+        self.assertIn("GGJ", config.ALL_WATCHED)
+        self.assertNotIn("GGJ", config.PUBLIC_KAP_CODES)
+        self.assertIn("TMV", config.PUBLIC_KAP_CODES)
+        self.assertNotIn("TMV", config.ALL_WATCHED)
+
+        items = [
+            self._item("1", ["GGJ"]),
+            self._item("2", ["TMV"]),
+            self._item("3", ["DOH"]),
+        ]
         public = kap.limited_to(items, config.PUBLIC_KAP_CODES)
         private = kap.limited_to(items, config.ALL_WATCHED)
-        self.assertEqual([i["id"] for i in public], ["2"])
-        self.assertEqual([i["id"] for i in private], ["1"])
+        self.assertEqual([i["id"] for i in public], ["2", "3"])
+        self.assertEqual([i["id"] for i in private], ["1", "3"])
 
     def test_a_shared_announcement_never_names_a_watchlist_fund_publicly(self):
         # A platform-wide announcement is collected from every fund page it
@@ -866,6 +886,34 @@ class TestPublicationCompleteness(unittest.TestCase):
     def test_too_little_overlap_is_inconclusive(self):
         current, previous = self._pair(moved=5, total=20)
         self.assertIsNone(storage.published_fraction(current, previous))
+
+
+class TestTeraGroupDraft(unittest.TestCase):
+    def test_lists_every_tera_fund_with_its_daily_return(self):
+        records = [make_record(c, daily_return=1.5) for c in config.TERA_GROUP]
+        records[-1]["tefas_traded"] = 0  # TMV
+        text = tweets.tera_group(records, "Dün")
+        self.assertIn("Tera grubu dün ne yaptı?", text)
+        for code in config.TERA_GROUP:
+            self.assertIn("#" + code, text)
+        self.assertTrue(text.endswith(config.TWEET_SUFFIX))
+        self.assertLessEqual(len(text), tweets.LIMIT)
+
+    def test_an_untraded_fund_that_is_not_a_named_exception_is_dropped(self):
+        # Only TMV may be untraded here. If another fund were delisted it must
+        # fall out of the post rather than become an untraded recommendation.
+        records = [make_record(c, daily_return=1.0) for c in config.TERA_GROUP]
+        for record in records:
+            if record["code"] == "THF":
+                record["tefas_traded"] = 0
+        text = tweets.tera_group(records, "Dün")
+        self.assertNotIn("#THF", text)
+        self.assertIn("#TLY", text)
+
+    def test_the_deleted_drafts_stay_deleted(self):
+        for gone in ("popular_funds", "crypto_funds"):
+            self.assertFalse(hasattr(tweets, gone), gone)
+        self.assertFalse(hasattr(config, "POPULAR_GROUPS"))
 
 
 class TestUnvaluedFunds(unittest.TestCase):

@@ -21,6 +21,13 @@ available anywhere in the TEFAS API (the portfolio-breakdown endpoint is one of
 the retired ones), so no draft claims to know what a fund holds. It says what
 the fund is called and what it returned.
 
+Two drafts were removed on 2026-08-26 at the owner's request and must not come
+back: the "popüler fonlar" thread, which grouped named funds under editorial
+headings, and the "kripto ve blokzinciri fonları" thread. The crypto weights
+they used still feed the standalone card in ``infographic.build_crypto_card``,
+and ``config.CRYPTO_HOLDINGS`` and ``market.bitcoin_24h`` are kept for the
+hand-written crypto post the owner is preparing.
+
 Every draft ends in ``ytd``. Posts longer than a single tweet come back as a
 list, to be sent as a thread.
 """
@@ -243,169 +250,36 @@ def card_bes(befas: List[dict], when: str) -> Optional[str]:
 # --- commentary -------------------------------------------------------------
 
 
-def popular_funds(records: List[dict], when: str) -> Optional[List[str]]:
-    """The named funds people actually talk about, grouped by what they show.
+def tera_group(records: List[dict], when: str) -> Optional[str]:
+    """The Tera Portföy funds and what they did on the day.
 
-    Deliberately includes funds our own leaderboards exclude: a fund with 2,500
-    investors never reaches the rankings, yet a 6% day is exactly what readers
-    are asking about.
+    Four funds, one line each, daily return only. `TMV` is the one TEFAS does
+    not trade, which is exactly why it is in ``config.EXTRA_FUND_CODES`` and
+    reachable at all; every other code has to be TEFAS-traded, and that is
+    checked here rather than assumed of the list, so a fund that is delisted
+    later drops out on its own instead of quietly becoming an untraded
+    recommendation.
     """
     by_code = _index(records)
-    thread: List[str] = []
-
-    # Call out a fund that moved hard but sits outside the rankings, and say why.
-    # Readers ask about exactly these, and the honest answer -- too few investors
-    # to be representative -- is more interesting than silence.
-    outsider = None
-    for record in records:
-        if not _significant_return(record):
+    lines = []
+    for code in config.TERA_GROUP:
+        record = by_code.get(code)
+        if not record:
             continue
-        if metrics.passes_investor_filter(record):
+        if code not in config.EXTRA_FUND_CODES and not metrics.is_tefas_traded(record):
             continue
-        value = _num(record.get("daily_return")) or 0
-        if abs(value) <= config.MAX_ABS_DAILY_RETURN_PCT and (
-            outsider is None or value > (_num(outsider.get("daily_return")) or 0)
-        ):
-            outsider = record
-
-    head = ["👀 {} popüler fonlar".format(when), ""]
-    if outsider:
-        head.append(
-            "{} {} 😱 ama yatırımcı sayısı {} olduğu için".format(
-                tag(outsider["code"]),
-                _pct(outsider.get("daily_return")),
-                formatter.count(outsider.get("investors")),
-            )
-        )
-        head.append("sıralamalarımıza girmiyor.")
-    else:
-        head.append("Sıralamalarımıza girmeyenler dahil, merak edilenler 👇")
-
-    opening = _finish(head)
-    if not opening:
-        return None
-    thread.append(opening)
-
-    for title, codes in config.POPULAR_GROUPS:
-        lines = ["{}".format(title), ""]
-        found = False
-        for code in codes:
-            record = by_code.get(code)
-            if not record:
-                continue
-            found = True
-            lines.append(
-                "{} gün {} · 1 ay {} · yılbaşı {}".format(
-                    tag(code),
-                    _pct(record.get("daily_return")),
-                    _pct(record.get("ret_1m")),
-                    _pct(record.get("ret_ytd")),
-                )
-            )
-        if not found:
+        if record.get("daily_return") is None:
             continue
-        text = _finish(lines)
-        if text:
-            thread.append(text)
+        lines.append("{} {}".format(tag(code), _pct(record.get("daily_return"))))
 
-    return thread if len(thread) > 1 else None
-
-
-def crypto_funds(records: List[dict], when: str) -> Optional[List[str]]:
-    """Blockchain and fintech funds, hung on bitcoin's move when there is one."""
-    quote = market.bitcoin_24h()
-    pool = [
-        record
-        for record in records
-        if any(
-            pattern in metrics.fold(record.get("name") or "")
-            for pattern in config.CRYPTO_NAME_PATTERNS
-        )
-    ]
-    if not pool:
+    if not lines:
         return None
-
-    pool.sort(key=lambda r: -(_num(r.get("ret_ytd")) or -1e9))
-
-    if quote and abs(quote["change"]) >= 2.0:
-        direction = "yükseldi" if quote["change"] > 0 else "geriledi"
-        opening = _finish(
-            [
-                "₿ Bitcoin son 24 saatte {} {}.".format(
-                    formatter.percent(quote["change"]), direction
-                ),
-                "",
-                "Peki TEFAS'ta kriptoya dolaylı bakan fonlar hangileri?",
-                "İşte blokzinciri ve fintek fonları 👇",
-            ]
-        )
-    else:
-        opening = _finish(
-            [
-                "⛓ TEFAS'ta blokzinciri ve fintek fonları",
-                "",
-                "Kripto şirketlerine dolaylı bakan fonlar bunlar 👇",
-            ]
-        )
-    if not opening:
-        return None
-
-    thread = [opening]
-    lines: List[str] = []
-    for record in pool:
-        line = "{} gün {} · yılbaşı {}".format(
-            tag(record["code"]),
-            _pct(record.get("daily_return")),
-            _pct(record.get("ret_ytd")),
-        )
-        candidate = _finish(lines + [line])
-        if candidate is None:
-            text = _finish(lines)
-            if text:
-                thread.append(text)
-            lines = [line]
-        else:
-            lines.append(line)
-    tail = _finish(lines)
-    if tail:
-        thread.append(tail)
-
-    # Every fund on the list, each with its own total. An earlier version showed
-    # the top five and hung two individual positions off each line, which read as
-    # though those positions were the fund's crypto exposure -- #RBL was printed
-    # as "%24,8 · BLCN %12,9, BLOK %11,9", the sum of the two named ETFs, while
-    # the fund actually holds four blockchain ETFs adding to %38,3. One number
-    # per fund, and the number is the whole of it.
-    #
-    # Weights come from the funds' own monthly KAP reports; see
-    # config.CRYPTO_HOLDINGS for how they are derived and what counts.
-    ranked = sorted(config.CRYPTO_HOLDINGS.items(), key=lambda item: -item[1][0])
-    weights = _finish(
-        [
-            "📁 Fonların içindeki kripto ağırlığı",
-            "({} KAP portföy raporları)".format(config.CRYPTO_HOLDINGS_MONTH),
-            "",
-        ]
-        + [
-            "{} %{}".format(tag(code), formatter.tr_number(total, 1))
-            for code, (total, _) in ranked
-        ]
+    heading = (
+        "🔷 Tera grubu dün ne yaptı?"
+        if when == "Dün"
+        else "🔷 Tera grubu {} günü ne yaptı?".format(when)
     )
-    if weights:
-        thread.append(weights)
-
-    closing = _finish(
-        [
-            "Bu fonlar kripto parayı doğrudan tutmaz;",
-            "madenci, kripto borsası ve blokzinciri şirketlerinin",
-            "hisselerini ve blokzinciri ETF'lerini alır.",
-            "",
-            "Ağırlıklar aylık KAP portföy raporlarından.",
-        ]
-    )
-    if closing:
-        thread.append(closing)
-    return [t for t in thread if t]
+    return _finish([heading, ""] + lines)
 
 
 def bes_five_year(records: List[dict]) -> Optional[List[str]]:
@@ -580,8 +454,7 @@ def build_drafts(
         ("Kart 1 — TEFAS getiri ve akış", lambda: card_tefas_flows(tefas_general, when)),
         ("Kart 2 — TEFAS yatırımcı ve segmentler", lambda: card_tefas_segments(tefas, when)),
         ("Kart 3 — BES", lambda: card_bes(befas, when)),
-        ("Popüler fonlar", lambda: popular_funds(records, when)),
-        ("Kripto ve blokzinciri fonları", lambda: crypto_funds(records, when)),
+        ("Tera grubu", lambda: tera_group(records, when)),
     ]
     if rotation == 0:
         plans.append(("BES 5 yıl retrospektifi", lambda: bes_five_year(records)))

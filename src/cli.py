@@ -177,71 +177,43 @@ def session_is_published() -> bool:
     return bool(changed)
 
 
-def session_is_complete(records: List[dict]) -> bool:
-    """Has TEFAS finished publishing, or only started?
+def report_gaps(records: List[dict]) -> List[str]:
+    """Funds that would have been printed but are not priced yet.
 
-    The cheap five-fund probe answers "has anything moved", which is not the same
-    question. Funds are valued and released across the morning, so an early run
-    can find the first few updated and the rest still on yesterday's prices --
-    and a report built on that mixes two sessions without looking wrong.
-
-    Measuring the whole universe settles it: a finished session moves ~99.6% of
-    prices, so anything well below that means waiting for a later attempt.
+    Reported, not withheld. Blocking on these was tried for a week and cost two
+    days: 2026-08-25 threw away a whole report over `PSH`, a fund with 354
+    investors that appears in no table. The owner's call is that the report goes
+    out regardless, which ``metrics.is_valued()`` makes tolerable -- the figures
+    for such a fund are blanked rather than invented, so it prints as a dash.
+    This is what tells the owner which rows are gaps.
     """
     latest = storage.latest_snapshot_date()
     if latest is None:
-        return True
-
+        return []
     previous = storage.load_snapshot(latest)
+    # Kept as a diagnostic even though nothing is withheld on it any more: a
+    # fraction well below 100% in the log is the quickest sign that a run
+    # fetched mid-publication.
+    fraction = storage.published_fraction(records, previous)
+    if fraction is not None:
+        log.info("Prices moved against %s: %.1f%%.", latest, fraction * 100)
 
-    # Funds still being valued come back as placeholders rather than being left
-    # out, and the fraction below cannot see them -- it skips any record without
-    # a usable price, so they leave its denominator instead of counting against
-    # it. On 2026-08-20 that let a run through at 99.5% with eighteen funds
-    # unpriced, and the report printed PHE at -100%. Even one is disqualifying:
-    # the session is still being published.
     late = storage.unvalued_funds(records, previous)
-    # Whether an unpriced fund is worth holding the report for depends on
-    # whether it would have been printed. On 2026-08-25 exactly one fund was
-    # late -- PSH, 16.6M TRY and 354 investors, below both ranking thresholds
-    # and on no list -- and the run refused to report anything at all. Nobody
-    # would have seen PSH either way. Eligibility is read off the *baseline*
-    # row, because the placeholder has zero assets and fails the size filter by
-    # construction.
-    blocking = [c for c in late if metrics.is_reportable(previous.get(c) or {"code": c})]
+    blocking = [
+        code
+        for code in late
+        if metrics.is_reportable(previous.get(code) or {"code": code})
+    ]
     if late:
-        log.info(
-            "%d fund(s) not priced yet: %s%s",
+        log.warning(
+            "%d fund(s) not priced yet: %s%s -- %d of them would be reported%s",
             len(late),
             ", ".join(sorted(late)[:12]),
             ", ..." if len(late) > 12 else "",
-        )
-    if blocking:
-        log.info(
-            "Session incomplete: %d of them would be reported (%s).",
             len(blocking),
-            ", ".join(sorted(blocking)[:12]),
+            " ({})".format(", ".join(sorted(blocking)[:12])) if blocking else "",
         )
-        return False
-    if late:
-        log.info("None of them reach a table; their figures are blanked instead.")
-
-    fraction = storage.published_fraction(records, previous)
-    if fraction is None:
-        log.info("Not enough overlap with %s to judge completeness.", latest)
-        return True
-
-    log.info(
-        "Published fraction against %s: %.1f%% (threshold %.0f%%).",
-        latest,
-        fraction * 100,
-        storage.PUBLISHED_THRESHOLD * 100,
-    )
-    # An unchanged universe is a session already reported, not a partial one;
-    # store() recognises that separately.
-    if fraction < 0.01:
-        return True
-    return fraction >= storage.PUBLISHED_THRESHOLD
+    return blocking
 
 
 def resolve_data_day(records: List[dict], run_dt) -> date:
@@ -272,25 +244,40 @@ def run_daily(args) -> Optional[List[str]]:
     run_dt = storage.now_istanbul()
     log.info("Run at %s (Istanbul).", run_dt.isoformat(timespec="seconds"))
 
+    if args.no_fetch:
+        # Re-render what is already stored. Used to reissue a report after a
+        # formatting change without spending ten minutes on TEFAS and without
+        # touching the snapshot the first run wrote.
+        stored_day = storage.latest_snapshot_date()
+        if stored_day is None:
+            raise RuntimeError("Nothing stored yet; --no-fetch has nothing to render.")
+        log.info("Rendering the stored snapshot for %s; fetching nothing.", stored_day)
+        return _render_stored(args, stored_day, run_dt)
+
     if args.only_if_new and not session_is_published():
         log.info("No new session yet; a later run will pick it up.")
         return None
 
     records = collect()
 
-    if args.only_if_new and not session_is_complete(records):
-        # There is one scheduled attempt a day, so "a later run will pick it up"
-        # is no longer true -- staying silent here means no report at all. Tell
-        # the owner, who can re-run it by hand once TEFAS has finished.
-        log.info("Session only partly published; not reporting.")
-        if not args.dry_run:
-            telegram.send_alert(
-                "TEFAS {} seansını henüz tamamlamamış; rapor gönderilmedi.\n"
-                "Yayın tamamlandığında daily.yml'i elle tetikleyebilirsin.".format(
-                    storage.data_date_for(run_dt).isoformat()
-                )
+    # The session is measured but no longer withheld. Blocking cost two days in
+    # one week -- once for eighteen genuinely late funds, once for a single fund
+    # that appears in no table -- and the owner's instruction is that the run
+    # reports whatever it finds. What makes that safe is metrics.is_valued():
+    # an unpriced fund's figures are blanked, so it prints as a dash instead of
+    # the -100% that started all this. What it costs is that the day's rows for
+    # those funds are gaps, in the report and in the stored snapshot, so the
+    # owner is told which ones.
+    incomplete = report_gaps(records)
+    if incomplete and not args.dry_run:
+        telegram.send_alert(
+            "TEFAS {} seansında {} fon henüz fiyatlanmamıştı: {}.\n"
+            "Rapor gönderildi; bu fonların günlük rakamları boş (—) görünüyor.".format(
+                storage.data_date_for(run_dt).isoformat(),
+                len(incomplete),
+                ", ".join(sorted(incomplete)[:10]),
             )
-        return None
+        )
 
     data_day = resolve_data_day(records, run_dt)
     effective_day, is_new = store(records, data_day)
@@ -328,7 +315,7 @@ def run_daily(args) -> Optional[List[str]]:
     )
 
     cards = _build_cards(records, effective_day)
-    channel = config.telegram_channel_id()
+    channel = None if args.owner_only else config.telegram_channel_id()
 
     if not args.dry_run:
         if channel:
@@ -361,6 +348,59 @@ def run_daily(args) -> Optional[List[str]]:
                 len(drafts),
                 sum(len(d["tweets"]) for d in drafts),
             )
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Could not send tweet drafts: %s", exc)
+
+    return formatter.daily_report(
+        kap_items=kap.limited_to(kap_items, config.ALL_WATCHED), **common
+    )
+
+
+def _render_stored(args, day: date, run_dt) -> Optional[List[str]]:
+    """Build and send a report from the stored snapshot, fetching nothing."""
+    records = list(storage.load_snapshot(day).values())
+    baseline_day, baseline = _baseline(day, None)
+    records = metrics.attach_deltas(records, baseline)
+    log.info("Coverage: %s", metrics.coverage(records))
+
+    by_code = metrics.index_by_code(records)
+    watched = [
+        (code, by_code[code].get("name") or "")
+        for code in config.KAP_CODES
+        if code in by_code
+    ]
+    kap_items = [] if args.no_kap else kap.fetch_disclosures(watched, today=run_dt.date())
+
+    common = dict(
+        records=records,
+        data_day=day,
+        run_day=run_dt.date(),
+        baseline_day=baseline_day,
+        kap_note=None if kap.ENABLED and not args.no_kap else kap.DISABLED_NOTE,
+    )
+    cards = _build_cards(records, day)
+    channel = None if args.owner_only else config.telegram_channel_id()
+
+    if not args.dry_run:
+        if channel:
+            try:
+                telegram.send(
+                    formatter.daily_report(
+                        public=True,
+                        kap_items=kap.limited_to(kap_items, config.PUBLIC_KAP_CODES),
+                        **common
+                    ),
+                    chat_id=channel,
+                )
+                _send_cards(cards, day, channel)
+            except Exception as exc:  # noqa: BLE001
+                log.warning("Could not post to the public channel: %s", exc)
+
+        _send_cards(cards, day, None)
+        try:
+            drafts = tweets.build_drafts(records, day, run_dt.date())
+            telegram.send(tweets.as_message(drafts))
+            log.info("Sent %d tweet draft(s).", len(drafts))
         except Exception as exc:  # noqa: BLE001
             log.warning("Could not send tweet drafts: %s", exc)
 
@@ -466,6 +506,21 @@ def main(argv=None) -> int:
         "--only-if-new",
         action="store_true",
         help="exit quietly unless TEFAS has published a session we have not stored",
+    )
+    parser.add_argument(
+        "--no-fetch",
+        action="store_true",
+        help="render the newest stored snapshot instead of fetching TEFAS",
+    )
+    parser.add_argument(
+        "--no-kap",
+        action="store_true",
+        help="skip the KAP scrape",
+    )
+    parser.add_argument(
+        "--owner-only",
+        action="store_true",
+        help="do not post to the public channel",
     )
     parser.add_argument(
         "--force",

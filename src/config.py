@@ -23,11 +23,11 @@ CARD_DIR = DATA_DIR / "cards"
 # --- Watchlist -------------------------------------------------------------
 # Funds the daily message always reports on, whatever their ranking.
 
-WATCHLIST = ["PHE", "TLY", "KHA", "THF"]
+WATCHLIST = ["TLY", "THF", "DOH", "DMG", "PHE", "KHA", "TAU"]
 MONEY_MARKET_WATCHLIST = ["TP2", "PRY", "PNU"]
 
 # BEFAS (pension) side, reported under its own heading.
-BEFAS_WATCHLIST = ["GGJ", "TVH", "GCN", "FFC", "NHN", "BZY"]
+BEFAS_WATCHLIST = ["GGJ", "TVH", "GCN"]
 
 ALL_WATCHED = WATCHLIST + MONEY_MARKET_WATCHLIST + BEFAS_WATCHLIST
 
@@ -99,14 +99,14 @@ PRECIOUS_METAL_PATTERNS = (
 # research -- only the codes listed here, and only where they are named.
 EXTRA_FUND_CODES = ["TMV"]
 
-# Funds the commentary tweets talk about by name, grouped so each line of the
-# "popular funds" post has a point to make. Codes are verified against the
-# snapshot at run time and silently dropped if a fund disappears.
-POPULAR_GROUPS = [
-    ("Popüler serbest fonlar", ["TLY", "TMV", "DOH", "DFI"]),
-    ("Para ve yatırımcı çeken fonlar", ["THF", "KHA"]),
-    ("Yılbaşından beri güçlü, son ayda zorlanan", ["PHE", "PBR"]),
-]
+# The Tera Portföy funds, for the daily "Tera grubu dün ne yaptı?" post. All
+# four really are Tera funds -- DUH was proposed for this list and dropped,
+# because it is Hedef Portföy and the post names the group in its heading.
+#
+# TMV is the one fund here TEFAS does not trade, which is why it is in
+# EXTRA_FUND_CODES. Every other code must be TEFAS-traded; tweets.tera_group()
+# enforces that rather than trusting the list.
+TERA_GROUP = ["TLY", "THF", "DOH", "TMV"]
 
 # Crypto exposure is not a TEFAS category, so it has to be matched by name.
 # "teknoloji" is useless here -- it pulls in 77 funds, nearly all semiconductor,
@@ -235,7 +235,7 @@ def within_delivery_window(moment) -> bool:
 # EXTRA_FUND_CODES: reporting a disclosure about a fund the commentary names by
 # hand is not ranking, comparing or researching it. Nothing else untraded may
 # be added here.
-PUBLIC_KAP_CODES = ["TLY", "TMV", "DOH", "DFI", "THF", "KHA", "PHE", "PBR"]
+PUBLIC_KAP_CODES = ["TLY", "THF", "DOH", "TMV", "PHE", "KHA"]
 
 # Every fund whose KAP page is scanned: the owner's watchlists plus the channel's
 # set, in a stable order, without duplicates. One pass, one browser context per
@@ -257,8 +257,8 @@ NAMED_FUNDS = frozenset(
     + KAP_CODES
     + PUBLIC_KAP_CODES
     + EXTRA_FUND_CODES
+    + TERA_GROUP
     + list(CRYPTO_HOLDINGS)
-    + [code for _, codes in POPULAR_GROUPS for code in codes]
 )
 
 # --- Runtime secrets -------------------------------------------------------
