@@ -962,6 +962,32 @@ class TestTeraGroupDraft(unittest.TestCase):
         self.assertNotIn("#THF", text)
         self.assertIn("#TLY", text)
 
+    def test_the_benchmark_post_names_only_watchlist_funds(self):
+        records = [make_record(c, ret_ytd=50.0) for c in config.ALL_WATCHED]
+        records += [make_record(c, ret_ytd=999.0) for c in ("PBR", "DFI", "EAE")]
+        thread = tweets.benchmark_thread(records)
+        body = "\n".join(thread)
+        for gone in ("PBR", "DFI", "EAE"):
+            self.assertNotIn("#" + gone, body, gone)
+        for code in config.WATCHLIST:
+            self.assertIn("#" + code, body, code)
+        # One money-market fund stands in for deposits, from the owner's list.
+        self.assertIn("Para piyasası", body)
+        self.assertTrue(
+            any("#" + c in body for c in config.MONEY_MARKET_WATCHLIST)
+        )
+
+    def test_the_benchmark_post_no_longer_crowns_a_best_of_fund(self):
+        # Picking the year's winner after the fact and printing it as "what
+        # gold did" reads as a result anyone could have had.
+        records = [make_record(c, ret_ytd=10.0) for c in config.ALL_WATCHED]
+        records.append(
+            make_record("WIN", ret_ytd=500.0, name="X PORTFÖY ALTIN FONU",
+                        category="Altın Fonu")
+        )
+        body = "\n".join(tweets.benchmark_thread(records))
+        self.assertNotIn("#WIN", body)
+
     def test_the_deleted_drafts_stay_deleted(self):
         for gone in ("popular_funds", "crypto_funds"):
             self.assertFalse(hasattr(tweets, gone), gone)

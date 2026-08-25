@@ -25,8 +25,9 @@ Two drafts were removed on 2026-08-26 at the owner's request and must not come
 back: the "popüler fonlar" thread, which grouped named funds under editorial
 headings, and the "kripto ve blokzinciri fonları" thread. The crypto weights
 they used still feed the standalone card in ``infographic.build_crypto_card``,
-and ``config.CRYPTO_HOLDINGS`` and ``market.bitcoin_24h`` are kept for the
-hand-written crypto post the owner is preparing.
+``config.CRYPTO_HOLDINGS`` and ``src/market.py`` are kept -- the first feeds
+the standalone crypto card, and both are wanted for the hand-written crypto post
+the owner is preparing -- but nothing in this module imports them any more.
 
 Every draft ends in ``ytd``. Posts longer than a single tweet come back as a
 list, to be sent as a thread.
@@ -38,7 +39,7 @@ import re
 from datetime import date
 from typing import Callable, Dict, List, Optional, Sequence
 
-from . import config, formatter, market, metrics
+from . import config, formatter, metrics
 
 LIMIT = 280
 
@@ -375,27 +376,45 @@ def why_funds() -> List[str]:
 def benchmark_thread(records: List[dict]) -> Optional[List[str]]:
     """Evergreen: what the year has actually paid, fund by fund.
 
-    Gold and deposits are represented by the best TEFAS fund of that kind rather
-    than by a spot price, because a fund is what a reader could have bought --
-    and because no free, reliable feed for Turkish inflation or the lira was
-    found worth trusting unattended.
+    Only the watchlists appear here. It used to name `PHE`, `PBR`, `TLY` and
+    `DFI` -- a hand-picked set that outlived the watchlist it came from -- and
+    to fill the gold and deposit lines with whichever fund of that kind had the
+    best year. That second habit is the more interesting one to have dropped:
+    picking the winner after the fact and printing it as "what gold did" reads
+    as a result anyone could have had, which is the sort of implied
+    recommendation this module exists to avoid. The watchlists carry their own
+    metals fund (`DMG`) and their own money-market funds, so the post now shows
+    what these funds did, and nothing else.
+
+    No spot prices and no inflation figure, for the reason in the module
+    docstring: no free feed was found trustworthy enough to publish from
+    unattended, and a wrong benchmark in a posted tweet is worse than none.
     """
-    eligible = metrics.eligible_universe(records)
-    by_code = _index(eligible)
+    by_code = _index(records)
 
-    def best_where(predicate) -> Optional[dict]:
-        pool = [
-            r
-            for r in eligible
-            if predicate(r) and _num(r.get("ret_ytd")) is not None
-        ]
-        return max(pool, key=lambda r: r["ret_ytd"]) if pool else None
+    def line(code: str, prefix: str = "") -> Optional[str]:
+        record = by_code.get(code)
+        if not record or _num(record.get("ret_ytd")) is None:
+            return None
+        if code not in config.EXTRA_FUND_CODES and not metrics.is_tefas_traded(record):
+            return None
+        return "{}{} {}".format(prefix, tag(code), _pct(record.get("ret_ytd")))
 
-    gold = best_where(metrics.is_precious_metal)
-    money = best_where(metrics.is_money_market)
-    named = [by_code[c] for c in ("PHE", "PBR", "TLY", "DFI") if c in by_code]
-
-    if not named or not money:
+    lines = [text for text in (line(code) for code in config.WATCHLIST) if text]
+    money = next(
+        (
+            text
+            for text in (
+                line(code, "🏦 Para piyasası ")
+                for code in config.MONEY_MARKET_WATCHLIST
+            )
+            if text
+        ),
+        None,
+    )
+    if money:
+        lines.append(money)
+    if not lines:
         return None
 
     opening = _finish(
@@ -411,14 +430,6 @@ def benchmark_thread(records: List[dict]) -> Optional[List[str]]:
     if not opening:
         return None
 
-    lines = [
-        "{} {}".format(tag(r["code"]), _pct(r.get("ret_ytd"))) for r in named
-    ]
-    if gold:
-        lines.append("🥇 Altın fonu {} {}".format(tag(gold["code"]), _pct(gold.get("ret_ytd"))))
-    lines.append(
-        "🏦 Para piyasası {} {}".format(tag(money["code"]), _pct(money.get("ret_ytd")))
-    )
     body = _finish(lines)
 
     closing = _finish(

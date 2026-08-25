@@ -40,7 +40,7 @@ secret lives in the code.
 | Repo | https://github.com/echoatlasarchive/FundScraperBot |
 | Workflows | `daily.yml` (weekdays, 08:20 UTC), `periodic.yml` (Mon + 1st, 09:15 + 10:15 UTC) |
 | Secrets set | `TELEGRAM_TOKEN`, `TELEGRAM_CHAT_ID`, `TELEGRAM_CHANNEL_ID` |
-| Tests | 99, `python -m unittest discover -s tests` |
+| Tests | 101, `python -m unittest discover -s tests` |
 | Public channel | [@NeredeParaVar](https://t.me/NeredeParaVar), id `-1004445596324` |
 | Brand assets | `brand/`, regenerate with `python brand/build_brand.py` |
 | History | Building from scratch; see §4 |
@@ -721,8 +721,20 @@ from with a warning.
 Refresh these when new monthly reports land; there is nothing to poll, since
 TEFAS's portfolio endpoint is retired.
 
+**The evergreen benchmark post names only the watchlists.** It used to name a
+hand-picked `PHE PBR TLY DFI` that outlived the watchlist it came from, and to
+fill its gold and deposit lines with whichever fund of that kind had had the
+best year. The second habit was the worse one: crowning the winner after the
+fact and printing it as "what gold did" presents a result nobody could have
+picked in advance as though anyone could have, which is the implied
+recommendation this module exists to avoid. The watchlists carry their own
+metals fund (`DMG`) and their own money-market funds, so the post shows what
+those did and nothing else.
+
 `src/market.py` supplies the only outside data: bitcoin's 24-hour move from
-CoinGecko's free tier. Turkish inflation and the lira rate are deliberately
+CoinGecko's free tier. **Nothing imports it at the moment** — it went unused
+when the crypto draft was removed — and it is kept for the hand-written crypto
+post. Turkish inflation and the lira rate are deliberately
 absent — no free source was found trustworthy enough to publish from unattended,
 and a wrong benchmark in a posted tweet is worse than a missing one. Where a
 benchmark is needed, TEFAS's own funds stand in (a gold fund for gold, a
