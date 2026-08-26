@@ -10,8 +10,12 @@ on:
   # session these reports read:
   #
   #   POST /repos/echoatlasarchive/FundScraperBot/actions/workflows/periodic.yml/dispatches
-  #   { "ref": "main", "inputs": { "report": "weekly" } }    -- Mondays, 12:15 and 13:15 Istanbul
-  #   { "ref": "main", "inputs": { "report": "monthly" } }   -- 1st of the month, same times
+  #   { "ref": "main", "inputs": { "report": "weekly" } }    -- Mondays, 12:15 and 12:35 Istanbul
+  #   { "ref": "main", "inputs": { "report": "monthly" } }   -- 1st of the month, 12:20 and 12:40 Istanbul
+  #
+  # Separate times for weekly and monthly, not a shared pair, so the two jobs
+  # in cron-job.org never collide when the 1st of the month happens to be a
+  # Monday.
   #
   # Same token as daily.yml's workflow_dispatch trigger: a fine-grained PAT
   # scoped to this repository with Actions: read and write, kept in the

@@ -7,7 +7,7 @@ on:
   # unreliable timing: a run that never starts cannot even warn about itself.
   #
   # An external scheduler (cron-job.org) calls this endpoint twice on weekdays,
-  # 11:20 and 12:20 Istanbul, both after TEFAS has finished (about 11:00 --
+  # 12:10 and 12:30 Istanbul, both after TEFAS has finished (about 11:00 --
   # fetching earlier is what printed PHE at -100%, HANDOFF 4a):
   #
   #   POST /repos/echoatlasarchive/FundScraperBot/actions/workflows/daily.yml/dispatches

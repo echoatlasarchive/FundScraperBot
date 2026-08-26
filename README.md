@@ -203,13 +203,14 @@ with **Actions: read and write** — a permission that can start and cancel
 workflow runs and nothing else; it cannot touch code or secrets. That token
 lives in cron-job.org's job configuration and must never be committed here.
 
-cron-job.org calls `daily.yml` twice on weekdays — 11:20 and 12:20 Istanbul,
+cron-job.org calls `daily.yml` twice on weekdays — 12:10 and 12:30 Istanbul,
 both after TEFAS has finished (it does not omit a fund it has not valued yet;
-see below) — and `periodic.yml` twice for each occasion, 12:15 and 13:15 on
-Mondays and on the 1st, passing `{"inputs":{"report":"weekly"}}` or
-`{"report":"monthly"}`. Every attempt runs with `--only-if-new`, so a second
-attempt costs seconds once the first has succeeded and can never send a
-duplicate report.
+see below) — and `periodic.yml` twice for each occasion: 12:15 and 12:35 on
+Mondays, 12:20 and 12:40 on the 1st (different minutes so the two jobs cannot
+collide when the 1st falls on a Monday), passing
+`{"inputs":{"report":"weekly"}}` or `{"report":"monthly"}`. Every attempt runs
+with `--only-if-new`, so a second attempt costs seconds once the first has
+succeeded and can never send a duplicate report.
 
 Separately from the schedule, a report is only ever **delivered** between 07:00
 and 20:00 Istanbul. The schedule decides when the bot runs; the window decides

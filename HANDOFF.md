@@ -353,12 +353,18 @@ this file recommended `repository_dispatch` instead, whose equivalent
 permission is `Contents: write` — strictly more power, since it can also push
 commits — and was dropped once that was checked).
 
-cron-job.org fires `daily.yml` twice on weekdays — **11:20 and 12:20
-Istanbul**, both after TEFAS has finished — and `periodic.yml` twice for each
-occasion — **12:15 and 13:15** on Mondays and on the 1st, passing
-`{"inputs":{"report":"weekly"}}` or `{"report":"monthly"}`. Both runs use
-`--only-if-new`, exactly like a cron would, so a second attempt costs seconds
-once the first has succeeded and can never produce a duplicate report.
+cron-job.org fires `daily.yml` twice on weekdays — **12:10 and 12:30
+Istanbul**, both after TEFAS has finished — and `periodic.yml` twice per
+occasion, on its own pair of minutes so the two never collide when the 1st
+falls on a Monday: **12:15 and 12:35** for the weekly report, **12:20 and
+12:40** for the monthly one, passing `{"inputs":{"report":"weekly"}}` or
+`{"report":"monthly"}`. Both runs use `--only-if-new`, exactly like a cron
+would, so a second attempt costs seconds once the first has succeeded and can
+never produce a duplicate report.
+
+Verified end to end on 2026-08-26: the owner's cron-job.org test runs for both
+the weekly and the monthly job reached GitHub and delivered a Telegram message
+(run ids `32971523804` and `32971937329`).
 
 This trades GitHub's unreliability for a dependency on a different free,
 best-effort service — cron-job.org gives no SLA either, though its own delays
