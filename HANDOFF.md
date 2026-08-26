@@ -40,7 +40,7 @@ secret lives in the code.
 | Repo | https://github.com/echoatlasarchive/FundScraperBot |
 | Workflows | `daily.yml` and `periodic.yml`, both triggered by `workflow_dispatch` -- from cron-job.org on a schedule, or by hand |
 | Secrets set | `TELEGRAM_TOKEN`, `TELEGRAM_CHAT_ID`, `TELEGRAM_CHANNEL_ID` |
-| Tests | 101, `python -m unittest discover -s tests` |
+| Tests | 105, `python -m unittest discover -s tests` |
 | Public channel | [@NeredeParaVar](https://t.me/NeredeParaVar), id `-1004445596324` |
 | Brand assets | `brand/`, regenerate with `python brand/build_brand.py` |
 | History | Building from scratch; see §4 |
@@ -358,13 +358,37 @@ Istanbul**, both after TEFAS has finished — and `periodic.yml` twice per
 occasion, on its own pair of minutes so the two never collide when the 1st
 falls on a Monday: **12:15 and 12:35** for the weekly report, **12:20 and
 12:40** for the monthly one, passing `{"inputs":{"report":"weekly"}}` or
-`{"report":"monthly"}`. Both runs use `--only-if-new`, exactly like a cron
-would, so a second attempt costs seconds once the first has succeeded and can
-never produce a duplicate report.
+`{"report":"monthly"}`.
+
+**Two different dedup mechanisms, because the two workflows have different
+"already done" signals available.** Daily's is free: `store()`'s snapshot
+fingerprint already tells `--only-if-new` whether the fetched session matches
+what is stored, so a second attempt naturally finds nothing new. Weekly and
+monthly fetch nothing — they only read a snapshot someone else wrote — so that
+signal does not exist for them, and **nothing enforced this before
+2026-08-26**: both scheduled attempts would read the identical file and send
+the identical message. `storage.already_sent_today()` /
+`mark_sent_today(kind, day)` close it with an explicit marker
+(`data/state/sent_weekly.json`, `sent_monthly.json`), keyed to the **Istanbul
+calendar day**, not the report's session date — the question is only "did an
+earlier attempt today already deliver this", not "has the data changed since".
+Checked in `cli.main()` before the report is even built, so a duplicate attempt
+costs nothing; `--force` bypasses it for a deliberate resend, matching daily's
+`--force` semantics. The marker is committed by `periodic.yml`'s own step,
+which is why that workflow needed `permissions: contents: write` (it was
+`read`) — and it shares daily.yml's `concurrency: group: fundbot-data` so a
+periodic push can never land mid-way through daily's own commit, and, as a
+side effect, so the first periodic attempt queues behind an in-progress daily
+run instead of reading yesterday's snapshot because daily had not finished yet
+(the two workflows' first attempts are only five to ten minutes apart, well
+inside daily's typical 20-30 minute run time).
 
 Verified end to end on 2026-08-26: the owner's cron-job.org test runs for both
 the weekly and the monthly job reached GitHub and delivered a Telegram message
-(run ids `32971523804` and `32971937329`).
+(run ids `32971523804` and `32971937329`), and the dedup itself was verified by
+calling `cli.main()` twice in a row with a mocked clock: the first call sent,
+the second logged "already sent today" and sent nothing, a third call for the
+other report kind sent normally, and `--force` overrode the block.
 
 This trades GitHub's unreliability for a dependency on a different free,
 best-effort service — cron-job.org gives no SLA either, though its own delays

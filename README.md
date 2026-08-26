@@ -208,9 +208,12 @@ both after TEFAS has finished (it does not omit a fund it has not valued yet;
 see below) — and `periodic.yml` twice for each occasion: 12:15 and 12:35 on
 Mondays, 12:20 and 12:40 on the 1st (different minutes so the two jobs cannot
 collide when the 1st falls on a Monday), passing
-`{"inputs":{"report":"weekly"}}` or `{"report":"monthly"}`. Every attempt runs
-with `--only-if-new`, so a second attempt costs seconds once the first has
-succeeded and can never send a duplicate report.
+`{"inputs":{"report":"weekly"}}` or `{"report":"monthly"}`.
+
+Every attempt runs with `--only-if-new` (daily) or is deduplicated by a
+same-day marker committed to `data/state/` (weekly/monthly), so the second
+attempt costs seconds once the first has succeeded and can never send a
+duplicate report.
 
 Separately from the schedule, a report is only ever **delivered** between 07:00
 and 20:00 Istanbul. The schedule decides when the bot runs; the window decides

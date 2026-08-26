@@ -6,6 +6,7 @@ Run with:  python -m unittest discover -s tests -v
 from __future__ import annotations
 
 import sys
+import tempfile
 import unittest
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -869,6 +870,42 @@ class TestCryptoCard(unittest.TestCase):
             self.assertNotIn(
                 "{} 20".format(month), html.replace(config.CRYPTO_HOLDINGS_MONTH, "")
             )
+
+
+class TestPeriodicSendDedup(unittest.TestCase):
+    """Weekly and monthly fetch nothing, so unlike daily they have no
+    fingerprint to notice a repeat with. cron-job.org fires each of them twice
+    a day on purpose -- a second chance if GitHub drops the first -- and
+    nothing stopped both from sending the same report until this was added.
+    """
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self._real_state_dir = config.STATE_DIR
+        config.STATE_DIR = Path(self._tmp.name)
+
+    def tearDown(self):
+        config.STATE_DIR = self._real_state_dir
+        self._tmp.cleanup()
+
+    def test_unmarked_day_is_not_already_sent(self):
+        self.assertFalse(storage.already_sent_today("weekly", date(2026, 8, 24)))
+
+    def test_marking_today_is_seen_by_a_later_check_the_same_day(self):
+        today = date(2026, 8, 24)
+        storage.mark_sent_today("weekly", today)
+        self.assertTrue(storage.already_sent_today("weekly", today))
+
+    def test_a_mark_does_not_carry_over_to_the_next_occasion(self):
+        # Next Monday must send fresh, not be blocked by last Monday's mark.
+        storage.mark_sent_today("weekly", date(2026, 8, 24))
+        self.assertFalse(storage.already_sent_today("weekly", date(2026, 8, 31)))
+
+    def test_weekly_and_monthly_marks_are_independent(self):
+        # The 1st of the month can fall on a Monday; one must not suppress
+        # the other.
+        storage.mark_sent_today("weekly", date(2026, 9, 1))
+        self.assertFalse(storage.already_sent_today("monthly", date(2026, 9, 1)))
 
 
 class TestDeliveryWindow(unittest.TestCase):

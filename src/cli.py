@@ -482,6 +482,14 @@ def run_crypto_card(args) -> None:
 # "crypto-card" write files and print; nothing they do needs a delivery window.
 SENDING_COMMANDS = frozenset({"daily", "weekly", "monthly"})
 
+# Weekly and monthly fetch nothing, so they have no natural "already reported"
+# signal the way daily's snapshot fingerprint gives it one for free -- see
+# storage.already_sent_today(). Daily is not here: its dedup is the session
+# fingerprint, keyed to the trading session rather than the calendar day, which
+# is the correct key for it (a manual re-run the next day should still be able
+# to resend yesterday's session deliberately).
+PERIODIC_COMMANDS = frozenset({"weekly", "monthly"})
+
 COMMANDS = {
     "daily": run_daily,
     "weekly": run_weekly,
@@ -525,7 +533,11 @@ def main(argv=None) -> int:
     parser.add_argument(
         "--force",
         action="store_true",
-        help="deliver even outside the Istanbul delivery window",
+        help=(
+            "deliver even outside the Istanbul delivery window, even if the "
+            "session was already reported, or even if today's weekly/monthly "
+            "report was already sent"
+        ),
     )
     parser.add_argument(
         "--no-alert",
@@ -569,6 +581,23 @@ def main(argv=None) -> int:
             pass
         args.dry_run = True
 
+    # cron-job.org fires each of weekly's and monthly's two daily attempts
+    # independently, and unlike daily there is nothing else to notice a repeat:
+    # both attempts would read the same stored snapshot and build the identical
+    # message. Checked before building the report, not after, so a duplicate
+    # attempt costs nothing.
+    if (
+        args.command in PERIODIC_COMMANDS
+        and not args.dry_run
+        and not args.force
+        and storage.already_sent_today(args.command, now.date())
+    ):
+        log.info(
+            "%s report already sent today (%s); skipping the duplicate attempt.",
+            args.command, now.date().isoformat(),
+        )
+        return 0
+
     try:
         message = COMMANDS[args.command](args)
     except Exception as exc:  # noqa: BLE001 - top level guard
@@ -584,6 +613,8 @@ def main(argv=None) -> int:
         telegram.preview(message)
     else:
         telegram.send(message)
+        if args.command in PERIODIC_COMMANDS:
+            storage.mark_sent_today(args.command, now.date())
     return 0
 
 

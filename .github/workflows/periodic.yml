@@ -19,10 +19,15 @@ on:
   #
   # Same token as daily.yml's workflow_dispatch trigger: a fine-grained PAT
   # scoped to this repository with Actions: read and write, kept in the
-  # scheduler's configuration and never committed here. Firing this twice
-  # costs nothing extra -- both attempts read the same stored snapshot and
-  # send the same message, so the owner simply gets it once, from whichever
-  # attempt runs.
+  # scheduler's configuration and never committed here.
+  #
+  # Firing this twice is deliberate -- a second chance if GitHub drops the
+  # first -- and is made safe by cli.main()'s own dedup (a "sent today" marker
+  # committed by the step below), not by anything about reading a snapshot.
+  # An earlier version of this comment claimed the two attempts would
+  # naturally agree and the owner would "simply get it once"; that was never
+  # true; nothing before 2026-08-26 stopped both attempts from sending the
+  # same report twice.
   workflow_dispatch:
     inputs:
       report:
@@ -32,7 +37,22 @@ on:
         default: weekly
 
 permissions:
-  contents: read
+  contents: write
+
+# Same group as daily.yml, deliberately -- concurrency groups are enforced
+# across the whole repository, not per workflow, so this queues behind an
+# in-progress daily run instead of racing it. Two things that needs:
+#   1. Git safety: both workflows commit to data/, and a periodic push landing
+#      mid-way through daily's own commit would conflict.
+#   2. Freshness: the first periodic attempt (12:15/12:20 Istanbul) fires only
+#      five or ten minutes after daily's first attempt (12:10), which typically
+#      takes 20-30 minutes end to end. Without serialising, that attempt would
+#      read yesterday's snapshot as "current" instead of waiting for today's.
+#      Queuing behind daily's run means it starts only once the new session is
+#      actually stored.
+concurrency:
+  group: fundbot-data
+  cancel-in-progress: false
 
 jobs:
   report:
@@ -63,3 +83,23 @@ jobs:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python -m src.cli ${{ steps.pick.outputs.kind }}
+
+      # cron-job.org fires this workflow twice per occasion (a second attempt
+      # in case the first is skipped by GitHub), and unlike the daily report
+      # there is no fetched-data fingerprint to notice a repeat with -- both
+      # attempts would read the identical stored snapshot. cli.main() marks
+      # today's send in data/state/sent_<kind>.json right after delivering, and
+      # refuses to send again the same calendar day; that marker has to be
+      # committed for the second attempt to see it.
+      - name: Commit the send marker
+        run: |
+          git config user.name "fundbot"
+          git config user.email "fundbot@users.noreply.github.com"
+          git add data/state
+          if git diff --staged --quiet; then
+            echo "Nothing to commit (already marked, or the send was skipped)."
+          else
+            git commit -m "data: mark ${{ steps.pick.outputs.kind }} report sent $(date -u +%Y-%m-%d)"
+            git pull --rebase --autostash origin "${GITHUB_REF_NAME}"
+            git push
+          fi

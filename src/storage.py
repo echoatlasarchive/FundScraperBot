@@ -389,3 +389,29 @@ def write_state(name: str, payload: dict) -> None:
     path.write_text(
         json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8"
     )
+
+
+# -- periodic-report dedup ----------------------------------------------------
+#
+# daily.yml gets its "already reported" answer for free: the fetched data either
+# matches the stored snapshot or it does not (store()'s fingerprint check), so a
+# second attempt on the same session naturally finds nothing new. Weekly and
+# monthly reports fetch nothing -- they only read a snapshot someone else
+# wrote -- so that mechanism does not apply, and two calendar-triggered
+# attempts on the same occasion (cron-job.org fires each of periodic.yml's
+# reports twice, so the second can pick up if the first is skipped) would
+# otherwise send the same report twice with nothing to stop it.
+#
+# The key is the *calendar day the run happened on*, in Istanbul, not the
+# session date inside the report. That is deliberately simpler than mirroring
+# daily's session-fingerprint approach: the question here is only "did an
+# earlier attempt today already deliver this report", not "has anything about
+# the underlying data changed since".
+
+
+def already_sent_today(kind: str, today: date) -> bool:
+    return read_state("sent_{}".format(kind)).get("date") == today.isoformat()
+
+
+def mark_sent_today(kind: str, today: date) -> None:
+    write_state("sent_{}".format(kind), {"date": today.isoformat()})
