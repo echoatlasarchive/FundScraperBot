@@ -38,7 +38,7 @@ secret lives in the code.
 | | |
 |---|---|
 | Repo | https://github.com/echoatlasarchive/FundScraperBot |
-| Workflows | `daily.yml` (weekdays, 08:20/09:20/10:20 UTC + `repository_dispatch`), `periodic.yml` (Mon + 1st + `repository_dispatch`) |
+| Workflows | `daily.yml` and `periodic.yml`, both triggered by `workflow_dispatch` -- from cron-job.org on a schedule, or by hand |
 | Secrets set | `TELEGRAM_TOKEN`, `TELEGRAM_CHAT_ID`, `TELEGRAM_CHANNEL_ID` |
 | Tests | 101, `python -m unittest discover -s tests` |
 | Public channel | [@NeredeParaVar](https://t.me/NeredeParaVar), id `-1004445596324` |
@@ -336,40 +336,52 @@ drops them altogether. The first seven weekdays, `daily.yml`:
 second. Note the clustering: almost everything that fires lands at 10:00–10:03Z
 whatever the cron says.
 
-None of this is fixable from here, so there are two answers, and both are in
-place:
+The fix, as of 2026-08-27, is to stop asking GitHub's scheduler to do this at
+all. Neither workflow has an `on: schedule` block any more; both are fired
+purely by `workflow_dispatch`, called over the API by **cron-job.org**, an
+external scheduler with no stake in GitHub's Actions queue. The API call:
 
-* **Three crons**, `20 8,9,10 * * 1-5`. All three are after TEFAS finishes, so
-  none can repeat §4a; `session_is_published()` makes the extras cost seconds
-  once a session has been reported. 13:20 Istanbul is the last, because a run
-  starting later finishes past the 13:30 order cutoff.
-* **An outside trigger**, which is the reliable one. Both workflows accept
-  `workflow_dispatch` over the API and `repository_dispatch`; they do the same
-  job, and **the permissions differ, which is the whole reason to prefer the
-  first**:
+    POST /repos/echoatlasarchive/FundScraperBot/actions/workflows/daily.yml/dispatches
+    { "ref": "main" }
 
-  | | endpoint | fine-grained permission |
-  |---|---|---|
-  | `workflow_dispatch` | `POST /repos/…/actions/workflows/daily.yml/dispatches` with `{"ref":"main"}` | **Actions: write** — can start and cancel runs, nothing else |
-  | `repository_dispatch` | `POST /repos/…/dispatches` with `{"event_type":"daily-report"}` | **Contents: write** — can also push commits here |
+using a **fine-grained PAT scoped to this repository alone, with `Actions: read
+and write`** — a permission that can start and cancel workflow runs and
+nothing else; it cannot touch code, secrets or any other repository. That
+token lives in cron-job.org's job configuration and **must never be committed
+here**. Verified against GitHub's own permissions table (an earlier note in
+this file recommended `repository_dispatch` instead, whose equivalent
+permission is `Contents: write` — strictly more power, since it can also push
+commits — and was dropped once that was checked).
 
-  Verified against GitHub's own permissions table, not assumed; an early note in
-  this file said Actions write for `repository_dispatch` and was wrong. The
-  token lives in the calling service and **must never be committed here**. Both
-  paths run with `--only-if-new`, exactly like a cron, so firing them too often
-  is harmless and cannot produce a duplicate report. An `event_type` no workflow
-  listens for is accepted with `204` and starts nothing.
+cron-job.org fires `daily.yml` twice on weekdays — **11:20 and 12:20
+Istanbul**, both after TEFAS has finished — and `periodic.yml` twice for each
+occasion — **12:15 and 13:15** on Mondays and on the 1st, passing
+`{"inputs":{"report":"weekly"}}` or `{"report":"monthly"}`. Both runs use
+`--only-if-new`, exactly like a cron would, so a second attempt costs seconds
+once the first has succeeded and can never produce a duplicate report.
 
-**Before debugging anything else, run `gh run list` and check whether a
-`schedule` event fired at all.**
+This trades GitHub's unreliability for a dependency on a different free,
+best-effort service — cron-job.org gives no SLA either, though its own delays
+are measured in seconds, not the tens of minutes GitHub's queue was producing,
+and it disables a job automatically after 25 consecutive failures with an
+email warning. Nothing stops adding GitHub crons back as a third layer if
+cron-job.org ever proves unreliable in its own right; the workflows still
+accept a bare `workflow_dispatch` from anywhere, so an `on: schedule:` block
+could be reintroduced without touching anything else.
+
+**Before debugging anything else: check cron-job.org's execution history for
+the job first — that is now the trigger — then `gh run list` for whether the
+dispatch actually reached GitHub.**
 
 ### Where this ended up
 
-**Three crons, `20 8,9,10 * * 1-5`, plus `repository_dispatch`, and the run
-reports whatever it finds.** The single cron was tried for four working days and
-missed two of them; the count went back up once that was measured rather than
-argued. The reasoning below is kept because it explains what the trade-offs
-were rather than what they should be.
+**No `schedule:` block in either workflow. cron-job.org calls `workflow_dispatch`
+twice per occasion, and the run reports whatever it finds.** Three GitHub crons
+were tried for a day and worked, but running two schedulers side by side meant
+one instant success and one duplicate-checking straggler forty minutes later for
+no benefit, so GitHub's own schedule was dropped once an external one was in
+place. The reasoning below is kept because it explains what the trade-offs were
+rather than what they should be.
 
 The hour is not negotiable and is the one thing every version has agreed on:
 **nothing may fetch before TEFAS has finished, about 11:00 Istanbul.** That is
@@ -387,9 +399,9 @@ failed in their own way:
   weekly report, 2026-08-25 a whole report discarded over `PSH`.
 
 So the gates now measure and report rather than withhold (`cli.report_gaps`).
-**A skipped cron still means no report and nothing to say so** — a run that
-never starts cannot warn about itself — which is exactly what the outside
-`repository_dispatch` trigger is for.
+**A skipped trigger still means no report and nothing to say so** — a run that
+never starts cannot warn about itself — which is exactly why the trigger no
+longer depends on GitHub's own scheduler at all.
 
 ### Historical: the hourly schedule, superseded 2026-08-20
 

@@ -1,61 +1,24 @@
 name: Daily report
 
 on:
-  schedule:
-    # 08:20, 09:20 and 10:20 UTC == 11:20, 12:20 and 13:20 Istanbul, weekdays.
-    #
-    # The HOUR is TEFAS and is the one constant across every version of this
-    # file: nothing may fetch before the platform has finished, about 11:00
-    # Istanbul. Fetching earlier is what printed PHE at -100% (HANDOFF 4a), so
-    # every attempt here sits after that line and none of them can repeat it.
-    #
-    # The COUNT is GitHub, which does not run these reliably. Measured over the
-    # first seven weekdays:
-    #
-    #   18 Aug  cron 09:00  ->  10:02Z   +62 min
-    #   19 Aug  cron 09:00  ->  10:03Z   +63 min
-    #   20 Aug  five crons  ->  07:29Z   one of five fired
-    #   21 Aug  cron 08:20  ->  10:00Z   +100 min
-    #   24 Aug  cron 08:20  ->  never    skipped
-    #   25 Aug  crons 08:20, 09:20 -> 10:00Z   08:20 skipped, 09:20 saved it
-    #   26 Aug  cron 08:20  ->  never    skipped
-    #
-    # A single attempt failed on two of its four days. Three attempts is the
-    # cheapest answer available inside GitHub: cli.session_is_published()
-    # probes five funds and exits in seconds once a session has been reported,
-    # so the extra attempts cost nothing on a normal day.
-    #
-    # 13:20 is deliberately the last: the run takes ~30 minutes, so a later one
-    # would finish past the 13:30 fund-order cutoff the report exists to beat.
-    # It is kept as a backstop -- a late report still beats none.
-    #
-    # This is best-effort and stays best-effort. The reliable trigger is the
-    # repository_dispatch below.
-    - cron: "20 8,9,10 * * 1-5"
-
-  # Two ways for an outside scheduler to fire this, because GitHub's own is
-  # best-effort. Prefer the first: it needs a strictly smaller token.
+  # GitHub's own scheduler is not the trigger here -- see HANDOFF for why.
+  # Measured over the first seven weekdays it ran 9 to 100 minutes late
+  # whenever it ran, and skipped the day outright twice, which is worse than
+  # unreliable timing: a run that never starts cannot even warn about itself.
   #
-  # 1. workflow_dispatch over the API -- fine-grained PAT, this repository
-  #    only, **Actions: read and write**. That permission can start and cancel
-  #    workflow runs and nothing else; it cannot change a single file here.
+  # An external scheduler (cron-job.org) calls this endpoint twice on weekdays,
+  # 11:20 and 12:20 Istanbul, both after TEFAS has finished (about 11:00 --
+  # fetching earlier is what printed PHE at -100%, HANDOFF 4a):
   #
-  #      POST /repos/echoatlasarchive/FundScraperBot/actions/workflows/daily.yml/dispatches
-  #      {"ref": "main"}
+  #   POST /repos/echoatlasarchive/FundScraperBot/actions/workflows/daily.yml/dispatches
+  #   { "ref": "main" }
   #
-  # 2. repository_dispatch below -- needs **Contents: read and write**, which
-  #    also lets the holder push commits to this repository. Same result, more
-  #    power in a token that lives on someone else's server, so only use it if
-  #    the calling service cannot send the first request.
-  #
-  #      POST /repos/echoatlasarchive/FundScraperBot/dispatches
-  #      {"event_type": "daily-report"}
-  #
-  # Either way the token belongs in the calling service and never in this
-  # repository. Both paths run with --only-if-new, exactly like a cron, so
-  # firing them repeatedly is harmless and cannot produce a duplicate report.
-  repository_dispatch:
-    types: [daily-report]
+  # using a fine-grained PAT scoped to this repository alone, with Actions:
+  # read and write -- a permission that can start and cancel workflow runs and
+  # nothing else. The token lives in that scheduler's configuration and is
+  # never committed here. Both attempts run with --only-if-new, exactly like a
+  # cron would, so firing this twice is harmless and cannot send a duplicate
+  # report; the second one costs seconds once the first has succeeded.
   workflow_dispatch:
     inputs:
       dry_run:

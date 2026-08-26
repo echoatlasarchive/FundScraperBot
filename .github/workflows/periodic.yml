@@ -1,23 +1,24 @@
 name: Weekly and monthly reports
 
 on:
-  schedule:
-    # Two attempts each, for the same reason as daily.yml: GitHub skips
-    # scheduled runs. This workflow had exactly one chance in its first week --
-    # Monday 2026-08-24 -- and was skipped, so no weekly report had ever gone
-    # out. The second attempt exits doing nothing expensive if the first
-    # succeeded, since it only reads snapshots.
-    #
-    # 09:15 and 10:15 UTC == 12:15 and 13:15 Istanbul, after the daily run has
-    # stored the session these reports read.
-    - cron: "15 9,10 * * 1"
-    # First day of the month, same slots.
-    - cron: "15 9,10 1 * *"
-  # Same reason as daily.yml: GitHub's scheduler skipped this workflow on its
-  # first Monday and no weekly report had ever gone out. Fire with
-  # {"event_type":"weekly-report"} or {"event_type":"monthly-report"}.
-  repository_dispatch:
-    types: [weekly-report, monthly-report]
+  # GitHub's own scheduler is not the trigger here -- see daily.yml and
+  # HANDOFF. This workflow had exactly one chance in its first week, Monday
+  # 2026-08-24, and GitHub skipped it: no weekly report had ever gone out.
+  #
+  # An external scheduler (cron-job.org) calls this endpoint instead, twice
+  # each for the weekly and monthly report, after the daily run has stored the
+  # session these reports read:
+  #
+  #   POST /repos/echoatlasarchive/FundScraperBot/actions/workflows/periodic.yml/dispatches
+  #   { "ref": "main", "inputs": { "report": "weekly" } }    -- Mondays, 12:15 and 13:15 Istanbul
+  #   { "ref": "main", "inputs": { "report": "monthly" } }   -- 1st of the month, same times
+  #
+  # Same token as daily.yml's workflow_dispatch trigger: a fine-grained PAT
+  # scoped to this repository with Actions: read and write, kept in the
+  # scheduler's configuration and never committed here. Firing this twice
+  # costs nothing extra -- both attempts read the same stored snapshot and
+  # send the same message, so the owner simply gets it once, from whichever
+  # attempt runs.
   workflow_dispatch:
     inputs:
       report:
@@ -47,17 +48,10 @@ jobs:
       - name: Choose the report
         id: pick
         run: |
-          if [ -n "${{ inputs.report }}" ]; then
-            echo "kind=${{ inputs.report }}" >> "$GITHUB_OUTPUT"
-          elif [ "${{ github.event.action }}" = "monthly-report" ]; then
-            echo "kind=monthly" >> "$GITHUB_OUTPUT"
-          elif [ "${{ github.event.action }}" = "weekly-report" ]; then
-            echo "kind=weekly" >> "$GITHUB_OUTPUT"
-          elif [ "$(date -u +%d)" = "01" ]; then
-            echo "kind=monthly" >> "$GITHUB_OUTPUT"
-          else
-            echo "kind=weekly" >> "$GITHUB_OUTPUT"
-          fi
+          # workflow_dispatch is the only trigger, and its "report" input
+          # always has a value -- "weekly" by default when a caller omits it,
+          # exactly as when someone runs this by hand from the Actions tab.
+          echo "kind=${{ inputs.report }}" >> "$GITHUB_OUTPUT"
 
       # Reads the snapshots the daily workflow committed; fetches nothing itself.
       - name: Send

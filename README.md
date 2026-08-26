@@ -188,28 +188,28 @@ The daily workflow needs write access to commit snapshots: **Settings → Action
 
 ### 3. Schedule
 
-`daily.yml` fires on weekdays at **08:20, 09:20 and 10:20 UTC — 11:20, 12:20
-and 13:20 Istanbul** — and each attempt exits within seconds unless TEFAS has
-published a session that is not already stored.
+Neither workflow has a GitHub `schedule:` trigger. GitHub's own scheduler
+turned out to be unreliable enough to be the wrong foundation for this: over
+the first seven weekdays it ran a daily cron 9 to 100 minutes late whenever it
+ran, and skipped it outright on two of them. So both workflows are fired purely
+by `workflow_dispatch`, called from **cron-job.org**, a free external
+scheduler with no stake in GitHub's Actions queue:
 
-The hour is set by when TEFAS finishes. It does not omit a fund it has not
-valued: it returns the row with price, assets and units all zero, so fetching
-early is not a free retry but a chance to publish a wrong report. Every attempt
-therefore sits after the platform is done, and a fund still unpriced when the
-run fetches has its figures blanked rather than invented.
+    POST /repos/<owner>/<repo>/actions/workflows/daily.yml/dispatches
+    { "ref": "main" }
 
-The count is set by GitHub, whose scheduler is best-effort: over the first seven
-weekdays it ran these 9 to 100 minutes late and skipped two days outright. For a
-trigger that does not depend on it, both workflows can be started from outside:
-`POST /repos/…/actions/workflows/daily.yml/dispatches` with `{"ref":"main"}`,
-using a fine-grained token scoped to this repository with **Actions: write** —
-a permission that can start runs and nothing else. (`repository_dispatch` also
-works but needs Contents: write, which can push commits, so prefer the first.)
-That token belongs in the calling service, never in this repository.
+using a fine-grained personal access token scoped to this repository alone,
+with **Actions: read and write** — a permission that can start and cancel
+workflow runs and nothing else; it cannot touch code or secrets. That token
+lives in cron-job.org's job configuration and must never be committed here.
 
-`periodic.yml` runs weekly on Monday and monthly on the 1st — twice each, for
-the same reason — and reads the snapshots the daily job committed rather than
-fetching anything itself.
+cron-job.org calls `daily.yml` twice on weekdays — 11:20 and 12:20 Istanbul,
+both after TEFAS has finished (it does not omit a fund it has not valued yet;
+see below) — and `periodic.yml` twice for each occasion, 12:15 and 13:15 on
+Mondays and on the 1st, passing `{"inputs":{"report":"weekly"}}` or
+`{"report":"monthly"}`. Every attempt runs with `--only-if-new`, so a second
+attempt costs seconds once the first has succeeded and can never send a
+duplicate report.
 
 Separately from the schedule, a report is only ever **delivered** between 07:00
 and 20:00 Istanbul. The schedule decides when the bot runs; the window decides
