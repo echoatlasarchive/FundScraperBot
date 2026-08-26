@@ -200,10 +200,12 @@ run fetches has its figures blanked rather than invented.
 
 The count is set by GitHub, whose scheduler is best-effort: over the first seven
 weekdays it ran these 9 to 100 minutes late and skipped two days outright. For a
-trigger that does not depend on it, both workflows also accept
-`repository_dispatch` — an outside scheduler POSTs `{"event_type":
-"daily-report"}` with a fine-grained token scoped to this repository. That token
-belongs in the calling service, never in this repository.
+trigger that does not depend on it, both workflows can be started from outside:
+`POST /repos/…/actions/workflows/daily.yml/dispatches` with `{"ref":"main"}`,
+using a fine-grained token scoped to this repository with **Actions: write** —
+a permission that can start runs and nothing else. (`repository_dispatch` also
+works but needs Contents: write, which can push commits, so prefer the first.)
+That token belongs in the calling service, never in this repository.
 
 `periodic.yml` runs weekly on Monday and monthly on the 1st — twice each, for
 the same reason — and reads the snapshots the daily job committed rather than

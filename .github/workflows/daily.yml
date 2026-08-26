@@ -33,19 +33,27 @@ on:
     # repository_dispatch below.
     - cron: "20 8,9,10 * * 1-5"
 
-  # An outside scheduler can fire this, because GitHub's own cannot be relied
-  # on. Send:
+  # Two ways for an outside scheduler to fire this, because GitHub's own is
+  # best-effort. Prefer the first: it needs a strictly smaller token.
   #
-  #   curl -X POST https://api.github.com/repos/echoatlasarchive/FundScraperBot/dispatches \
-  #        -H "Accept: application/vnd.github+json" \
-  #        -H "Authorization: Bearer <token>" \
-  #        -d '{"event_type":"daily-report"}'
+  # 1. workflow_dispatch over the API -- fine-grained PAT, this repository
+  #    only, **Actions: read and write**. That permission can start and cancel
+  #    workflow runs and nothing else; it cannot change a single file here.
   #
-  # The token is a fine-grained PAT scoped to this repository alone with
-  # Actions: read and write, and it belongs in the calling service, never in
-  # this repository. A dispatch behaves exactly like a scheduled run --
-  # --only-if-new, so firing it repeatedly is harmless and a duplicate cannot
-  # be sent.
+  #      POST /repos/echoatlasarchive/FundScraperBot/actions/workflows/daily.yml/dispatches
+  #      {"ref": "main"}
+  #
+  # 2. repository_dispatch below -- needs **Contents: read and write**, which
+  #    also lets the holder push commits to this repository. Same result, more
+  #    power in a token that lives on someone else's server, so only use it if
+  #    the calling service cannot send the first request.
+  #
+  #      POST /repos/echoatlasarchive/FundScraperBot/dispatches
+  #      {"event_type": "daily-report"}
+  #
+  # Either way the token belongs in the calling service and never in this
+  # repository. Both paths run with --only-if-new, exactly like a cron, so
+  # firing them repeatedly is harmless and cannot produce a duplicate report.
   repository_dispatch:
     types: [daily-report]
   workflow_dispatch:

@@ -343,12 +343,22 @@ place:
   none can repeat §4a; `session_is_published()` makes the extras cost seconds
   once a session has been reported. 13:20 Istanbul is the last, because a run
   starting later finishes past the 13:30 order cutoff.
-* **`repository_dispatch`**, which is the reliable one. An outside scheduler
-  POSTs `{"event_type":"daily-report"}` (or `weekly-report` / `monthly-report`)
-  with a fine-grained PAT scoped to this repository with Actions read+write.
-  **That token lives in the calling service and must never be committed here.**
-  A dispatch runs with `--only-if-new`, exactly like a cron, so firing it too
-  often is harmless and cannot produce a duplicate report.
+* **An outside trigger**, which is the reliable one. Both workflows accept
+  `workflow_dispatch` over the API and `repository_dispatch`; they do the same
+  job, and **the permissions differ, which is the whole reason to prefer the
+  first**:
+
+  | | endpoint | fine-grained permission |
+  |---|---|---|
+  | `workflow_dispatch` | `POST /repos/…/actions/workflows/daily.yml/dispatches` with `{"ref":"main"}` | **Actions: write** — can start and cancel runs, nothing else |
+  | `repository_dispatch` | `POST /repos/…/dispatches` with `{"event_type":"daily-report"}` | **Contents: write** — can also push commits here |
+
+  Verified against GitHub's own permissions table, not assumed; an early note in
+  this file said Actions write for `repository_dispatch` and was wrong. The
+  token lives in the calling service and **must never be committed here**. Both
+  paths run with `--only-if-new`, exactly like a cron, so firing them too often
+  is harmless and cannot produce a duplicate report. An `event_type` no workflow
+  listens for is accepted with `204` and starts nothing.
 
 **Before debugging anything else, run `gh run list` and check whether a
 `schedule` event fired at all.**
