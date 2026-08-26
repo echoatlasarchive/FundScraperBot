@@ -188,20 +188,22 @@ The daily workflow needs write access to commit snapshots: **Settings → Action
 
 ### 3. Schedule
 
-`daily.yml` fires once on weekdays, at **08:20 UTC — 11:20 Istanbul**, and
-reports whatever it finds.
+`daily.yml` fires on weekdays at **08:20, 09:20 and 10:20 UTC — 11:20, 12:20
+and 13:20 Istanbul** — and each attempt exits within seconds unless TEFAS has
+published a session that is not already stored.
 
-The hour is set by when TEFAS finishes, not by when the report would ideally
-land. TEFAS does not omit a fund it has not valued — it returns the row with
-price, assets and units all zero — so fetching early is not a free retry, it is
-a chance to publish a wrong report. A fund that is still unpriced when the run
-fetches has its figures blanked rather than invented, prints as a dash, and is
-named in a Telegram alert to the owner.
+The hour is set by when TEFAS finishes. It does not omit a fund it has not
+valued: it returns the row with price, assets and units all zero, so fetching
+early is not a free retry but a chance to publish a wrong report. Every attempt
+therefore sits after the platform is done, and a fund still unpriced when the
+run fetches has its figures blanked rather than invented.
 
-GitHub skips and delays scheduled runs (40 to 100 minutes late, and outright
-skipped on 2026-08-24). With a single attempt that means no report on a skipped
-day, and nothing announces it — a run that never starts cannot warn about
-itself. Dispatch the workflow by hand when a morning passes without a message.
+The count is set by GitHub, whose scheduler is best-effort: over the first seven
+weekdays it ran these 9 to 100 minutes late and skipped two days outright. For a
+trigger that does not depend on it, both workflows also accept
+`repository_dispatch` — an outside scheduler POSTs `{"event_type":
+"daily-report"}` with a fine-grained token scoped to this repository. That token
+belongs in the calling service, never in this repository.
 
 `periodic.yml` runs weekly on Monday and monthly on the 1st — twice each, for
 the same reason — and reads the snapshots the daily job committed rather than

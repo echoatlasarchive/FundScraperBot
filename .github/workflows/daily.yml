@@ -2,21 +2,52 @@ name: Daily report
 
 on:
   schedule:
-    # 08:20 UTC == 11:20 Istanbul, once, on weekdays. Owner's decision, twice
-    # stated: one attempt, and it reports whatever it finds.
+    # 08:20, 09:20 and 10:20 UTC == 11:20, 12:20 and 13:20 Istanbul, weekdays.
     #
-    # The hour is set by when TEFAS finishes. Measured 2026-08-20: a run that
-    # fetched at 10:29 Istanbul found eighteen funds still unpriced, and the
-    # owner puts the point at which most funds are settled at about 11:00.
-    # Nothing may fetch before that -- see HANDOFF 4a.
+    # The HOUR is TEFAS and is the one constant across every version of this
+    # file: nothing may fetch before the platform has finished, about 11:00
+    # Istanbul. Fetching earlier is what printed PHE at -100% (HANDOFF 4a), so
+    # every attempt here sits after that line and none of them can repeat it.
     #
-    # GitHub fires these 40 to 100 minutes late and sometimes not at all
-    # (2026-08-24 and the 11:20 slot on 2026-08-25 were both skipped). A second
-    # attempt was tried for a day and removed again on request. So a skipped
-    # cron means no report that day, and the only signal is its absence: the
-    # run cannot warn about itself failing to start. Dispatch by hand when that
-    # happens.
-    - cron: "20 8 * * 1-5"
+    # The COUNT is GitHub, which does not run these reliably. Measured over the
+    # first seven weekdays:
+    #
+    #   18 Aug  cron 09:00  ->  10:02Z   +62 min
+    #   19 Aug  cron 09:00  ->  10:03Z   +63 min
+    #   20 Aug  five crons  ->  07:29Z   one of five fired
+    #   21 Aug  cron 08:20  ->  10:00Z   +100 min
+    #   24 Aug  cron 08:20  ->  never    skipped
+    #   25 Aug  crons 08:20, 09:20 -> 10:00Z   08:20 skipped, 09:20 saved it
+    #   26 Aug  cron 08:20  ->  never    skipped
+    #
+    # A single attempt failed on two of its four days. Three attempts is the
+    # cheapest answer available inside GitHub: cli.session_is_published()
+    # probes five funds and exits in seconds once a session has been reported,
+    # so the extra attempts cost nothing on a normal day.
+    #
+    # 13:20 is deliberately the last: the run takes ~30 minutes, so a later one
+    # would finish past the 13:30 fund-order cutoff the report exists to beat.
+    # It is kept as a backstop -- a late report still beats none.
+    #
+    # This is best-effort and stays best-effort. The reliable trigger is the
+    # repository_dispatch below.
+    - cron: "20 8,9,10 * * 1-5"
+
+  # An outside scheduler can fire this, because GitHub's own cannot be relied
+  # on. Send:
+  #
+  #   curl -X POST https://api.github.com/repos/echoatlasarchive/FundScraperBot/dispatches \
+  #        -H "Accept: application/vnd.github+json" \
+  #        -H "Authorization: Bearer <token>" \
+  #        -d '{"event_type":"daily-report"}'
+  #
+  # The token is a fine-grained PAT scoped to this repository alone with
+  # Actions: read and write, and it belongs in the calling service, never in
+  # this repository. A dispatch behaves exactly like a scheduled run --
+  # --only-if-new, so firing it repeatedly is harmless and a duplicate cannot
+  # be sent.
+  repository_dispatch:
+    types: [daily-report]
   workflow_dispatch:
     inputs:
       dry_run:

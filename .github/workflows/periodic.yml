@@ -13,6 +13,11 @@ on:
     - cron: "15 9,10 * * 1"
     # First day of the month, same slots.
     - cron: "15 9,10 1 * *"
+  # Same reason as daily.yml: GitHub's scheduler skipped this workflow on its
+  # first Monday and no weekly report had ever gone out. Fire with
+  # {"event_type":"weekly-report"} or {"event_type":"monthly-report"}.
+  repository_dispatch:
+    types: [weekly-report, monthly-report]
   workflow_dispatch:
     inputs:
       report:
@@ -44,6 +49,10 @@ jobs:
         run: |
           if [ -n "${{ inputs.report }}" ]; then
             echo "kind=${{ inputs.report }}" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event.action }}" = "monthly-report" ]; then
+            echo "kind=monthly" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event.action }}" = "weekly-report" ]; then
+            echo "kind=weekly" >> "$GITHUB_OUTPUT"
           elif [ "$(date -u +%d)" = "01" ]; then
             echo "kind=monthly" >> "$GITHUB_OUTPUT"
           else

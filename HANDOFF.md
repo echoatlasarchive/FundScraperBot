@@ -38,7 +38,7 @@ secret lives in the code.
 | | |
 |---|---|
 | Repo | https://github.com/echoatlasarchive/FundScraperBot |
-| Workflows | `daily.yml` (weekdays, 08:20 UTC), `periodic.yml` (Mon + 1st, 09:15 + 10:15 UTC) |
+| Workflows | `daily.yml` (weekdays, 08:20/09:20/10:20 UTC + `repository_dispatch`), `periodic.yml` (Mon + 1st + `repository_dispatch`) |
 | Secrets set | `TELEGRAM_TOKEN`, `TELEGRAM_CHAT_ID`, `TELEGRAM_CHANNEL_ID` |
 | Tests | 101, `python -m unittest discover -s tests` |
 | Public channel | [@NeredeParaVar](https://t.me/NeredeParaVar), id `-1004445596324` |
@@ -315,11 +315,51 @@ confirms this data is the session after the newest stored one, that is what it
 is — and falls back to `data_date_for()` only on a first run or after a gap the
 chain cannot bridge.
 
+### GitHub's scheduler is the unreliable part — measure it before blaming the code
+
+Kept at the top of this section because it is the first thing to check when a
+morning passes without a message, and because it has been mistaken for a bug in
+this repository twice. Scheduled runs are best-effort: GitHub delays them, and
+drops them altogether. The first seven weekdays, `daily.yml`:
+
+| Date | Cron | Fired | |
+|---|---|---|---|
+| 18 Aug | 09:00 | 10:02Z | +62 min |
+| 19 Aug | 09:00 | 10:03Z | +63 min |
+| 20 Aug | five, 05:20–09:20 | 07:29Z | **one of five** |
+| 21 Aug | 08:20 | 10:00Z | +100 min |
+| 24 Aug | 08:20 | — | **skipped** |
+| 25 Aug | 08:20, 09:20 | 10:00Z | 08:20 skipped, 09:20 saved it |
+| 26 Aug | 08:20 | — | **skipped** |
+
+`periodic.yml` was skipped on its first Monday and fired 91 minutes late on its
+second. Note the clustering: almost everything that fires lands at 10:00–10:03Z
+whatever the cron says.
+
+None of this is fixable from here, so there are two answers, and both are in
+place:
+
+* **Three crons**, `20 8,9,10 * * 1-5`. All three are after TEFAS finishes, so
+  none can repeat §4a; `session_is_published()` makes the extras cost seconds
+  once a session has been reported. 13:20 Istanbul is the last, because a run
+  starting later finishes past the 13:30 order cutoff.
+* **`repository_dispatch`**, which is the reliable one. An outside scheduler
+  POSTs `{"event_type":"daily-report"}` (or `weekly-report` / `monthly-report`)
+  with a fine-grained PAT scoped to this repository with Actions read+write.
+  **That token lives in the calling service and must never be committed here.**
+  A dispatch runs with `--only-if-new`, exactly like a cron, so firing it too
+  often is harmless and cannot produce a duplicate report.
+
+**Before debugging anything else, run `gh run list` and check whether a
+`schedule` event fired at all.**
+
 ### Where this ended up
 
-**One cron, `20 8 * * 1-5`, and it reports whatever it finds.** Both are the
-owner's decision, each stated twice, and the reasoning below is kept because it
-explains what the trade-offs were rather than what they should be.
+**Three crons, `20 8,9,10 * * 1-5`, plus `repository_dispatch`, and the run
+reports whatever it finds.** The single cron was tried for four working days and
+missed two of them; the count went back up once that was measured rather than
+argued. The reasoning below is kept because it explains what the trade-offs
+were rather than what they should be.
 
 The hour is not negotiable and is the one thing every version has agreed on:
 **nothing may fetch before TEFAS has finished, about 11:00 Istanbul.** That is
@@ -336,11 +376,10 @@ failed in their own way:
   the gates turned every delay into silence: 2026-08-24 no daily report and no
   weekly report, 2026-08-25 a whole report discarded over `PSH`.
 
-So the gates now measure and report rather than withhold (`cli.report_gaps`),
-and there is one attempt. **A skipped cron therefore means no report that day
-and nothing will say so** — the run cannot warn about its own failure to start.
-That is understood and accepted; dispatch `daily.yml` by hand when a morning
-passes without a message.
+So the gates now measure and report rather than withhold (`cli.report_gaps`).
+**A skipped cron still means no report and nothing to say so** — a run that
+never starts cannot warn about itself — which is exactly what the outside
+`repository_dispatch` trigger is for.
 
 ### Historical: the hourly schedule, superseded 2026-08-20
 
