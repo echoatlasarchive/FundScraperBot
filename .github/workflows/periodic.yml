@@ -60,7 +60,21 @@ jobs:
     timeout-minutes: 15
 
     steps:
+      # ref: main is explicit and not the default on purpose. Without it,
+      # checkout resolves to the commit "main" pointed to when this run was
+      # *dispatched*, not when it actually starts -- and this workflow shares
+      # a concurrency group, so a run can sit queued for the ~25 minutes
+      # another run takes. On 2026-08-27 two attempts landed five minutes
+      # apart (12:10 and 12:30 Istanbul); the second waited correctly for the
+      # first to finish, but its checkout still fetched the pre-dispatch
+      # commit, missed the snapshot the first run had just pushed, and reran
+      # the whole fetch-and-send pipeline as if nothing had happened -- a
+      # duplicate report, only caught (as a failure, not a rollback) when its
+      # own push hit a conflict on the file the first run had already added.
+      # Naming the branch here makes checkout re-resolve it at execution time.
       - uses: actions/checkout@v4
+        with:
+          ref: main
 
       - uses: actions/setup-python@v5
         with:

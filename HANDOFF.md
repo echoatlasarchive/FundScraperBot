@@ -390,6 +390,36 @@ calling `cli.main()` twice in a row with a mocked clock: the first call sent,
 the second logged "already sent today" and sent nothing, a third call for the
 other report kind sent normally, and `--force` overrode the block.
 
+### 4b. `actions/checkout` pins the dispatch-time commit, not the queue-time one
+
+Found the day after the fix above, by the mechanism it should have prevented.
+On 2026-08-27 `daily.yml` ran twice, 20 minutes apart (12:10 and 12:30
+Istanbul). The second correctly **queued** behind the first via
+`concurrency: group: fundbot-data` — its job did not start until the first's
+finished — but it still reported the session as unpublished
+(`Probe against 2026-08-25`, when the first run had already stored and pushed
+`2026-08-26` three seconds earlier) and reran the entire pipeline: TEFAS fetch,
+KAP scan, the report, the cards, the tweet drafts, all sent a second time. It
+only surfaced as a *failure*, not a silent duplicate, because its final step —
+committing the snapshot it had just re-fetched — hit a merge conflict against
+the file the first run had already added, which is also what triggered
+GitHub's "all jobs have failed" email.
+
+The cause is `actions/checkout@v4`'s default `ref`: for a `workflow_dispatch`
+call, it resolves to whatever commit the target branch pointed to **at the
+moment GitHub received the dispatch**, not at the moment the job actually
+starts. A concurrency group delays *execution* but does nothing about that
+resolution, so a queued run's checkout is stale by exactly however long it
+waited — in this case, long enough to miss a commit that had already been
+pushed and merged by the time the run's own first log line printed.
+
+Fixed by pinning `ref: main` explicitly on the checkout step in both
+`daily.yml` and `periodic.yml`, which forces a fresh resolution of the branch
+at execution time instead of dispatch time. **Concurrency queuing is still
+needed alongside this** — it is what stops the two runs from writing to `data/`
+at the same instant — this fix addresses the other half: that the second run,
+once its turn came, actually saw what the first one had done.
+
 This trades GitHub's unreliability for a dependency on a different free,
 best-effort service — cron-job.org gives no SLA either, though its own delays
 are measured in seconds, not the tens of minutes GitHub's queue was producing,
