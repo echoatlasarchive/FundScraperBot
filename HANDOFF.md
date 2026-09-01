@@ -108,6 +108,16 @@ So flow rankings need two sessions, the weekly report about a week, the monthly
 about a month. Each report says so explicitly rather than printing an empty
 table. **Do not "fix" a missing flow table that is simply waiting for data.**
 
+This is not hypothetical and will be mistaken for a bug: collection began
+**2026-08-14**, so the monthly report's 30-day baseline does not exist until
+about **2026-09-13**. Until then every 1st-of-the-month run correctly delivers
+a 172-character "yeterli geçmiş veri yok" notice instead of a report, and the
+owner confirmed on 2026-09-01 that this should stay as it is rather than
+falling back to the oldest available snapshot. `cli._baseline()` asks
+`storage.snapshot_on_or_before(current - 30 days)`; with nothing at or before
+2026-08-01 it returns `None`, and `formatter._period_report()` prints the
+notice. The weekly report is unaffected — 7 days back always resolves.
+
 The snapshot files are the only copy of this history. Losing them loses the
 history permanently — it cannot be re-fetched.
 
@@ -356,9 +366,12 @@ commits — and was dropped once that was checked).
 cron-job.org fires `daily.yml` twice on weekdays — **12:10 and 12:30
 Istanbul**, both after TEFAS has finished — and `periodic.yml` twice per
 occasion, on its own pair of minutes so the two never collide when the 1st
-falls on a Monday: **12:15 and 12:35** for the weekly report, **12:20 and
-12:40** for the monthly one, passing `{"inputs":{"report":"weekly"}}` or
+falls on a Monday: **13:15 and 13:35** for the weekly report, **13:20 and
+13:40** for the monthly one, passing `{"inputs":{"report":"weekly"}}` or
 `{"report":"monthly"}`.
+
+The hour-long gap between daily's pair and periodic's is deliberate and was
+bought with an incident — see "one pending run per group" below.
 
 **Two different dedup mechanisms, because the two workflows have different
 "already done" signals available.** Daily's is free: `store()`'s snapshot
@@ -389,6 +402,37 @@ the weekly and the monthly job reached GitHub and delivered a Telegram message
 calling `cli.main()` twice in a row with a mocked clock: the first call sent,
 the second logged "already sent today" and sent nothing, a third call for the
 other report kind sent normally, and `--force` overrode the block.
+
+### 4a-bis. A concurrency group keeps **one** pending run, and cancels the rest
+
+`cancel-in-progress: false` does not mean "queue everything". GitHub holds at
+most **one** run pending per concurrency group; when another arrives, the
+pending one is **cancelled** and the newcomer takes its place. Both workflows
+share `group: fundbot-data`, so all four daily triggers of a Monday compete for
+that single slot.
+
+Measured on 2026-08-31, four triggers inside 25 minutes:
+
+| | | |
+|---|---|---|
+| 12:10 | daily #1 | **success** (ran ~25 min) |
+| 12:15 | weekly #1 | **cancelled** — displaced when daily #2 arrived |
+| 12:30 | daily #2 | **cancelled** — displaced when weekly #2 arrived |
+| 12:35 | weekly #2 | **success** |
+
+Both reports still went out, purely because the surviving attempt of each pair
+happened to be the later one. But the second attempt of each pair exists as
+*redundancy against a dropped trigger*, and the queue was quietly eating it: a
+day where the survivor also failed would have lost the report with two attempts
+nominally configured.
+
+The group itself is right and must stay — it is what stops periodic reading
+yesterday's snapshot while daily is still fetching, and what keeps two pushes
+off `data/` at once. **The fix is scheduling.** Periodic's times moved from
+12:15/12:35 to **13:15/13:35** (and monthly to 13:20/13:40), an hour clear of
+daily's 12:10/12:30, so daily has long finished and nothing queues. Those times
+live in cron-job.org, not in this repository, so this is a note to check there
+first if cancellations reappear.
 
 ### 4b. `actions/checkout` pins the dispatch-time commit, not the queue-time one
 
